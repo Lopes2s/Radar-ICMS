@@ -79,9 +79,7 @@ nova: `sqlite3` é da biblioteca padrão do Python.
   escopo, mas como extração a partir do que foi pesquisado, não mais como
   o produto de uma sessão de processamento.
 - A **Resposta** das consultas é guardada com parágrafos (separados por
-  `
-
-`), reconstruídos do layout do PDF; o detalhe na interface mostra um
+  `\n\n`), reconstruídos do layout do PDF; o detalhe na interface mostra um
   bloco por parágrafo e a planilha quebra linha na coluna Resposta.
 - Consultas **já mapeadas** só ganham parágrafos ao **reimportar o PDF**
   (o upsert atualiza o registro, sem duplicar).
