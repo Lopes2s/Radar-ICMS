@@ -216,3 +216,43 @@ def test_topicos_numerados_do_regime_ganham_quebra_de_linha_no_modal():
     assert "\n\n2.1.1.1. O recolhimento" in campo
     # o próprio 2.1. inicial não precisa de quebra antes (já é o começo do campo)
     assert campo.startswith("2.1. Fica estabelecido")
+
+
+def test_resposta_do_modal_vira_um_p_por_paragrafo_com_texto_escapado():
+    from core import armazenamento as arm
+    conn = arm.conectar(os.environ["MAPEADOR_BANCO"])
+    arm.criar_esquema(conn)
+    arm.salvar_consultas(conn, [
+        {'Ano': '2026', 'Nº da Consulta': '001', 'Data da Publicação': '',
+         'Protocolo': '', 'Súmula': 'ICMS.', 'Problema da Consulta': 'p',
+         'CNAE Detectado': '',
+         'Resposta': 'a) primeiro item\n\n1. segundo <b>item</b> & $x$\n\n* terceiro'},
+    ])
+    at = AppTest.from_file(APP).run(timeout=30)
+    at.tabs[1].selectbox[0].set_value("consulta").run(timeout=30)
+    at.session_state["tabela-resultados"] = {"selection": {"rows": [0], "columns": []}}
+    at.run(timeout=30)
+    assert not at.exception
+    campo = next(m.value for m in at.markdown
+                 if '<p class="icms-resposta-paragrafo">' in m.value)
+    assert campo.count('<p class="icms-resposta-paragrafo">') == 3
+    assert '<p class="icms-resposta-paragrafo">a) primeiro item</p>' in campo
+    assert '1. segundo &lt;b&gt;item&lt;/b&gt; &amp; $x$' in campo
+    assert '<b>item</b>' not in campo
+    assert '\n' not in campo   # uma linha só: sem linha em branco que encerre o bloco HTML
+
+
+def test_resposta_antiga_sem_quebras_aparece_como_um_paragrafo():
+    from core import armazenamento as arm
+    conn = arm.conectar(os.environ["MAPEADOR_BANCO"])
+    arm.criar_esquema(conn)
+    arm.salvar_consultas(conn, [
+        {'Ano': '2026', 'Nº da Consulta': '002', 'Data da Publicação': '',
+         'Protocolo': '', 'Súmula': 'ICMS.', 'Problema da Consulta': '',
+         'CNAE Detectado': '', 'Resposta': 'texto achatado antigo'}])
+    at = AppTest.from_file(APP).run(timeout=30)
+    at.tabs[1].selectbox[0].set_value("consulta").run(timeout=30)
+    at.session_state["tabela-resultados"] = {"selection": {"rows": [0], "columns": []}}
+    at.run(timeout=30)
+    campo = next(m.value for m in at.markdown if "texto achatado antigo" in m.value)
+    assert campo.count('<p class="icms-resposta-paragrafo">') == 1

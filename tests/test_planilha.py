@@ -112,3 +112,23 @@ def test_aba_de_arquivos_e_descartes_com_origem():
         ws_d = wb["Log de descartes"]
         assert [c.value for c in ws_d[1]] == planilha.COLS_DESCARTES
         assert ws_d.cell(row=2, column=4).value == 'doe.pdf'
+
+
+def test_resposta_das_consultas_tem_wrap_text_e_coluna_larga_demais_colunas_nao():
+    consultas = [{'Ano': '2026', 'Nº da Consulta': '001', 'Súmula': 'ICMS.',
+                  'Resposta': 'Primeiro.\n\nSegundo.'}]
+    regimes = [{'ANO': '2026', 'EMENTA': 'x\n\ny'}]
+    with tempfile.TemporaryDirectory() as d:
+        saida = os.path.join(d, "out.xlsx")
+        planilha.gerar_xlsx(saida, consultas, regimes, [])
+        wb = load_workbook(saida)
+        ws = wb["Consultas — a revisar"]
+        col = planilha.COLS_CONSULTAS.index('Resposta') + 1
+        assert ws.cell(row=2, column=col).value == 'Primeiro.\n\nSegundo.'
+        assert ws.cell(row=2, column=col).alignment.wrap_text is True
+        letra = ws.cell(row=1, column=col).column_letter
+        assert ws.column_dimensions[letra].width >= 60
+        sumula = planilha.COLS_CONSULTAS.index('Súmula') + 1
+        assert not ws.cell(row=2, column=sumula).alignment.wrap_text
+        wr = wb["Regimes — a revisar"]
+        assert not any(c.alignment.wrap_text for linha in wr.iter_rows(min_row=2) for c in linha)

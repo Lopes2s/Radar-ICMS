@@ -41,7 +41,11 @@ def _sanear(valor):
     return valor, valor.startswith('=')
 
 
-def _escreve_aba(ws, cols, linhas):
+COLUNAS_COM_QUEBRA = {'Resposta'}
+_LARGURA_COLUNA_QUEBRA = 80
+
+
+def _escreve_aba(ws, cols, linhas, colunas_quebra=()):
     ws.append(cols)
     for c in range(1, len(cols) + 1):
         cell = ws.cell(row=1, column=c)
@@ -54,9 +58,13 @@ def _escreve_aba(ws, cols, linhas):
             cell = ws.cell(row=n_linha, column=n_col, value=valor)
             if forcar_texto:
                 cell.data_type = 's'
+            if campo in colunas_quebra:
+                cell.alignment = Alignment(wrap_text=True, vertical='top')
     for i, col in enumerate(cols, 1):
         letra = ws.cell(row=1, column=i).column_letter
-        ws.column_dimensions[letra].width = min(max(len(col) + 2, 14), 55)
+        ws.column_dimensions[letra].width = (
+            _LARGURA_COLUNA_QUEBRA if col in colunas_quebra
+            else min(max(len(col) + 2, 14), 55))
 
 
 def gerar_xlsx(caminho_saida, consultas=None, regimes=None, descartes=None,
@@ -68,7 +76,8 @@ def gerar_xlsx(caminho_saida, consultas=None, regimes=None, descartes=None,
     wb = Workbook()
     wb.remove(wb.active)
     if consultas:
-        _escreve_aba(wb.create_sheet('Consultas — a revisar'), COLS_CONSULTAS, consultas)
+        _escreve_aba(wb.create_sheet('Consultas — a revisar'), COLS_CONSULTAS, consultas,
+                     colunas_quebra=COLUNAS_COM_QUEBRA)
     if regimes:
         _escreve_aba(wb.create_sheet('Regimes — a revisar'), COLS_REGIMES, regimes)
     if descartes:

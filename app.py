@@ -1,5 +1,6 @@
 # app.py
 import base64
+import html
 import io
 import os
 import re
@@ -158,6 +159,12 @@ div[class*="st-key-metric-descartes"] [data-testid="stMetricValue"] {{
     letter-spacing: 0.04em;
     margin-top: 0.9rem;
 }}
+
+.icms-resposta-paragrafo {{
+    margin: 0 0 0.9em 0;
+    line-height: 1.55;
+    text-align: justify;
+}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -217,6 +224,18 @@ def _com_quebras_por_topico(texto: str) -> str:
     return _MARCADOR_DE_TOPICO.sub(r'\n\n\1', texto)
 
 
+def _resposta_em_paragrafos(texto: str) -> str:
+    """Resposta da consulta como HTML: um <p> por parágrafo ("\\n\\n"), com o
+    texto escapado — assim "a)", "1." ou "*" no início de um parágrafo não
+    viram lista em Markdown e "<" ou "&" aparecem literalmente. Tudo numa
+    linha só: uma linha em branco encerraria o bloco HTML no Markdown."""
+    paragrafos = [p.strip() for p in texto.split("\n\n") if p.strip()]
+    return "".join(
+        f'<p class="icms-resposta-paragrafo">{html.escape(p)}</p>'
+        for p in paragrafos
+    )
+
+
 @st.dialog("Detalhes", width="large", on_dismiss=_fecha_selecao_da_tabela)
 def _mostra_detalhe(tipo: str, registro: dict, colunas: list):
     st.subheader(_titulo_do_registro(tipo, registro))
@@ -228,6 +247,8 @@ def _mostra_detalhe(tipo: str, registro: dict, colunas: list):
                     unsafe_allow_html=True)
         if tipo == "regime":
             st.markdown(_com_quebras_por_topico(valor))
+        elif tipo == "consulta" and campo == "Resposta":
+            st.markdown(_resposta_em_paragrafos(valor), unsafe_allow_html=True)
         else:
             st.write(valor)
 
