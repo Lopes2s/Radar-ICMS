@@ -166,11 +166,6 @@ div[class*="st-key-metric-descartes"] [data-testid="stMetricValue"] {{
     line-height: 1.55;
     text-align: justify;
 }}
-/* Citação legal (lei/decreto transcritos pelo fisco): só o recuo à esquerda,
-   para distinguir a resposta do fisco do texto citado. */
-.icms-resposta-citacao {{
-    margin-left: 2.5rem;
-}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -230,6 +225,9 @@ def _com_quebras_por_topico(texto: str) -> str:
     return _MARCADOR_DE_TOPICO.sub(r'\n\n\1', texto)
 
 
+_RECUO_CITACAO = "2.5rem"
+
+
 def _resposta_em_paragrafos(texto: str) -> str:
     """Resposta da consulta como HTML: um <p> por parágrafo ("\\n\\n"), com o
     texto escapado — assim "a)", "1." ou "*" no início de um parágrafo não
@@ -241,12 +239,16 @@ def _resposta_em_paragrafos(texto: str) -> str:
     for p in paragrafos:
         # MARCA_CITACAO (invisível) abre o parágrafo de citação legal: vira a
         # classe de recuo e nunca chega ao HTML como texto.
-        classe = "icms-resposta-paragrafo"
+        classe, estilo = "icms-resposta-paragrafo", ""
         if p.startswith(MARCA_CITACAO):
+            # O recuo vai INLINE (além da classe): o CSS do Streamlit para <p>
+            # dentro do markdown é mais específico que uma regra só por classe
+            # e a anulava — comprovado no navegador.
             classe += " icms-resposta-citacao"
+            estilo = f' style="margin-left:{_RECUO_CITACAO}"'
         texto_p = p.replace(MARCA_CITACAO, "").strip()
         if texto_p:
-            saida.append(f'<p class="{classe}">{html.escape(texto_p)}</p>')
+            saida.append(f'<p class="{classe}"{estilo}>{html.escape(texto_p)}</p>')
     return "".join(saida)
 
 

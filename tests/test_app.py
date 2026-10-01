@@ -351,5 +351,9 @@ def test_citacao_legal_ganha_recuo_e_o_marcador_invisivel_nunca_aparece():
                  and 'Texto do fisco.' in m.value)
     assert MARCA_CITACAO not in campo
     assert campo.count('<p class="icms-resposta-paragrafo">') == 2
-    assert ('<p class="icms-resposta-paragrafo icms-resposta-citacao">'
+    # o recuo vai INLINE: o CSS do Streamlit para <p> dentro do markdown é mais
+    # específico que uma regra só por classe e a anulava (visto no navegador).
+    assert ('<p class="icms-resposta-paragrafo icms-resposta-citacao" '
+            'style="margin-left:2.5rem">'
             '&quot;Art. 31. Citado &lt;b&gt;.&quot;</p>') in campo
+    assert campo.count('style="margin-left') == 1   # só a citação, não o fisco
