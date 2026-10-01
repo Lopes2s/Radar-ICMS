@@ -29,6 +29,15 @@ def _isola_banco(monkeypatch, tmp_path):
     monkeypatch.setenv("MAPEADOR_BANCO", str(tmp_path / "app_teste.db"))
 
 
+def _app(perfil="admin"):
+    """AppTest já 'logado'. O portão de perfil é testado nos testes próprios
+    mais abaixo; os demais testes só precisam do app aberto."""
+    at = AppTest.from_file(APP)
+    if perfil:
+        at.session_state["perfil"] = perfil
+    return at
+
+
 def test_isolamento_nunca_usa_o_banco_real_do_projeto():
     banco_do_teste = os.environ.get("MAPEADOR_BANCO")
     assert banco_do_teste is not None
@@ -36,7 +45,7 @@ def test_isolamento_nunca_usa_o_banco_real_do_projeto():
 
 
 def test_pagina_abre_sem_erro_e_pede_pdfs():
-    at = AppTest.from_file(APP).run(timeout=30)
+    at = _app().run(timeout=30)
     assert not at.exception
     assert any("Envie um ou mais PDFs" in i.value for i in at.info)
 
@@ -44,7 +53,7 @@ def test_pagina_abre_sem_erro_e_pede_pdfs():
 def test_resultado_guardado_sobrevive_a_reexecucao():
     # simula o estado deixado por um processamento anterior: é isto que o
     # clique em "Baixar" (que reexecuta o script) precisa encontrar.
-    at = AppTest.from_file(APP)
+    at = _app()
     at.session_state["resultado"] = {
         "arquivos": [{'Arquivo': 'c.pdf', 'Tipo': 'consulta', 'Consultas': 1,
                       'Regimes': 0, 'Descartes': 0, 'Erro': ''}],
@@ -60,13 +69,13 @@ def test_resultado_guardado_sobrevive_a_reexecucao():
 
 
 def test_aba_consultar_aparece():
-    at = AppTest.from_file(APP).run(timeout=30)
+    at = _app().run(timeout=30)
     assert not at.exception
     assert any("Consultar" in t.label for t in at.tabs)
 
 
 def test_botao_de_exportar_so_aparece_com_resultados():
-    at = AppTest.from_file(APP).run(timeout=30)
+    at = _app().run(timeout=30)
     aba = at.tabs[1]
     assert not any("Baixar estes resultados" in b.label for b in aba.download_button)
 
@@ -103,7 +112,7 @@ def test_selecionar_linha_abre_o_modal_de_detalhe(monkeypatch):
          'Resposta': 'RESPOSTA_MARCADOR_UNICO'},
     ])
 
-    at = AppTest.from_file(APP).run(timeout=30)
+    at = _app().run(timeout=30)
     at.tabs[1].selectbox[0].set_value("consulta").run(timeout=30)
     assert not any("RESPOSTA_MARCADOR_UNICO" in m.value for m in at.markdown)
 
@@ -131,7 +140,7 @@ def test_fechar_modal_limpa_a_selecao_e_ele_nao_reabre_sozinho():
          'CNAE Detectado': '', 'Resposta': ''},
     ])
 
-    at = AppTest.from_file(APP).run(timeout=30)
+    at = _app().run(timeout=30)
     at.tabs[1].selectbox[0].set_value("consulta").run(timeout=30)
     at.session_state["tabela-resultados"] = {"selection": {"rows": [0], "columns": []}}
     at.run(timeout=30)
@@ -163,7 +172,7 @@ def test_selecionar_linha_de_regime_tambem_abre_o_modal_de_detalhe():
          'DISPOSIÇÕES GERAIS': 'DISPOSICOES_MARCADOR_UNICO'},
     ])
 
-    at = AppTest.from_file(APP).run(timeout=30)
+    at = _app().run(timeout=30)
     at.tabs[1].selectbox[0].set_value("regime").run(timeout=30)
     assert not any("ABRANGENCIA_MARCADOR_UNICO" in m.value for m in at.markdown)
 
@@ -205,7 +214,7 @@ def test_topicos_numerados_do_regime_ganham_quebra_de_linha_no_modal():
          'DISPOSIÇÕES GERAIS': ''},
     ])
 
-    at = AppTest.from_file(APP).run(timeout=30)
+    at = _app().run(timeout=30)
     at.tabs[1].selectbox[0].set_value("regime").run(timeout=30)
     at.session_state["tabela-resultados"] = {"selection": {"rows": [0], "columns": []}}
     at.run(timeout=30)
@@ -228,7 +237,7 @@ def test_resposta_do_modal_vira_um_p_por_paragrafo_com_texto_escapado():
          'CNAE Detectado': '',
          'Resposta': 'a) primeiro item\n\n1. segundo <b>item</b> & $x$\n\n* terceiro'},
     ])
-    at = AppTest.from_file(APP).run(timeout=30)
+    at = _app().run(timeout=30)
     at.tabs[1].selectbox[0].set_value("consulta").run(timeout=30)
     at.session_state["tabela-resultados"] = {"selection": {"rows": [0], "columns": []}}
     at.run(timeout=30)
@@ -250,9 +259,71 @@ def test_resposta_antiga_sem_quebras_aparece_como_um_paragrafo():
         {'Ano': '2026', 'Nº da Consulta': '002', 'Data da Publicação': '',
          'Protocolo': '', 'Súmula': 'ICMS.', 'Problema da Consulta': '',
          'CNAE Detectado': '', 'Resposta': 'texto achatado antigo'}])
-    at = AppTest.from_file(APP).run(timeout=30)
+    at = _app().run(timeout=30)
     at.tabs[1].selectbox[0].set_value("consulta").run(timeout=30)
     at.session_state["tabela-resultados"] = {"selection": {"rows": [0], "columns": []}}
     at.run(timeout=30)
     campo = next(m.value for m in at.markdown if "texto achatado antigo" in m.value)
     assert campo.count('<p class="icms-resposta-paragrafo">') == 1
+
+
+# --- perfis ----------------------------------------------------------------
+def _tela_inicial(secrets=None):
+    at = AppTest.from_file(APP)
+    if secrets is not None:
+        at.secrets["admin"] = secrets
+    return at.run(timeout=30)
+
+
+def test_abre_na_tela_inicial_sem_abas_nem_uploader():
+    at = _tela_inicial({"senha": "segredo"})
+    assert not at.exception
+    assert len(at.tabs) == 0
+    assert len(at.get("file_uploader")) == 0
+    assert {b.key for b in at.button} >= {"entrar-consulta", "entrar-admin"}
+
+
+def test_perfil_consulta_ve_so_a_aba_consultar():
+    at = _tela_inicial({"senha": "segredo"})
+    at.button(key="entrar-consulta").click().run(timeout=30)
+    assert not at.exception
+    assert len(at.tabs) == 1 and "Consultar" in at.tabs[0].label
+    assert len(at.get("file_uploader")) == 0
+    assert "Trocar perfil" in [b.label for b in at.button]
+
+
+def test_admin_com_senha_errada_e_recusado():
+    at = _tela_inicial({"senha": "segredo"})
+    at.text_input(key="senha-admin").input("errada")
+    at.button(key="entrar-admin").click().run(timeout=30)
+    assert not at.exception
+    assert len(at.error) == 1
+    assert len(at.tabs) == 0
+    assert at.session_state.filtered_state.get("perfil") is None
+
+
+def test_admin_com_senha_certa_ve_as_duas_abas():
+    at = _tela_inicial({"senha": "segredo"})
+    at.text_input(key="senha-admin").input("segredo")
+    at.button(key="entrar-admin").click().run(timeout=30)
+    assert not at.exception
+    assert [t.label for t in at.tabs][0].endswith("Processar e mapear")
+    assert len(at.tabs) == 2
+    assert len(at.get("file_uploader")) == 1
+
+
+def test_sem_senha_configurada_o_botao_admin_fica_desabilitado():
+    at = _tela_inicial()          # nenhum secret definido
+    assert at.button(key="entrar-admin").disabled is True
+    assert at.text_input(key="senha-admin").disabled is True
+    assert any("não configurada" in w.value for w in at.warning)
+    # e o perfil Consulta continua disponível
+    assert at.button(key="entrar-consulta").disabled is False
+
+
+def test_trocar_perfil_volta_para_a_tela_inicial():
+    at = _app("consulta").run(timeout=30)
+    at.button(key="trocar-perfil").click().run(timeout=30)
+    assert not at.exception
+    assert len(at.tabs) == 0
+    assert "entrar-consulta" in {b.key for b in at.button}

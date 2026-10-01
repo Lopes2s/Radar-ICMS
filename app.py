@@ -14,7 +14,7 @@ garantir_dependencias(DEPS_APP)
 
 import streamlit as st  # noqa: E402
 
-from core import armazenamento, consulta, pipeline, planilha  # noqa: E402
+from core import acesso, armazenamento, consulta, pipeline, planilha  # noqa: E402
 
 _FORCAR = {"Detectar automaticamente": None,
            "Forçar Consulta": "consulta",
@@ -256,6 +256,7 @@ def _mostra_detalhe(tipo: str, registro: dict, colunas: list):
 def _processar(enviados, forcar):
     """Processa os uploads, persiste no banco e devolve o resultado a
     guardar na sessão."""
+    acesso.exige_admin(st.session_state.get("perfil"))
     lote = pipeline.Lote()
     barra = st.progress(0.0, text="Processando...")
     for i, arq in enumerate(enviados):
@@ -281,75 +282,123 @@ def _processar(enviados, forcar):
             "mapeamento": mapeamento, "xlsx": buf.getvalue()}
 
 
-aba_processar, aba_consultar = st.tabs(["📥 Processar e mapear", "🔎 Consultar"])
+def _tela_inicial():
+    """Escolha de perfil. Consulta entra direto; Administrador exige a senha
+    de .streamlit/secrets.toml e fica desabilitado se ela não estiver
+    configurada (nunca cai em acesso aberto)."""
+    st.markdown("### Como deseja entrar?")
+    esperada = acesso.senha_admin(st.secrets)
+    col_consulta, col_admin = st.columns(2)
 
-with aba_processar:
-    with st.sidebar:
-        st.header("Como funciona")
-        st.markdown(
-            "1. Envie os PDFs (consultas SEFA e/ou páginas do Diário).\n"
-            "2. A ferramenta detecta o tipo, extrai os campos e mapeia no "
-            "banco local.\n"
-            "3. Use a aba **Consultar** para buscar o que já foi mapeado, "
-            "ou baixe a planilha desta sessão se quiser.\n\n"
-            "Reprocessar o mesmo PDF atualiza o que já estava mapeado, "
-            "sem duplicar."
-        )
-        st.divider()
-        escolha = st.radio(
-            "Tipo do PDF", list(_FORCAR),
-            help="Use 'forçar' se a detecção automática errar.",
-        )
+    with col_consulta, st.container(border=True, key="perfil-consulta"):
+        st.subheader("Consulta")
+        st.caption("Pesquisar as consultas e os regimes já mapeados. Sem senha.")
+        if st.button("Entrar para consulta", key="entrar-consulta", type="primary"):
+            st.session_state["perfil"] = acesso.PERFIL_CONSULTA
+            st.rerun()
 
-    arquivos = st.file_uploader("Arraste os PDFs aqui", type=["pdf"],
-                                accept_multiple_files=True)
+    with col_admin, st.container(border=True, key="perfil-admin"):
+        st.subheader("Administrador")
+        st.caption("Importar PDFs e reprocessar o banco. Exige senha.")
+        if esperada is None:
+            st.warning("Senha do administrador não configurada. Crie "
+                       ".streamlit/secrets.toml (veja secrets.toml.example).")
+        senha = st.text_input("Senha", type="password", key="senha-admin",
+                              disabled=esperada is None)
+        if st.button("Entrar como administrador", key="entrar-admin",
+                     disabled=esperada is None):
+            if acesso.confere(senha, esperada):
+                st.session_state["perfil"] = acesso.PERFIL_ADMIN
+                st.rerun()
+            else:
+                st.error("Senha incorreta.")
 
-    if arquivos and st.button("▶️ Processar", type="primary"):
-        st.session_state["resultado"] = _processar(arquivos, _FORCAR[escolha])
 
-    # Exibido a partir da sessão, e não de dentro do `if st.button`: assim o
-    # resultado continua na tela depois de qualquer reexecução do script
-    # (por exemplo, o clique em "Baixar").
-    resultado = st.session_state.get("resultado")
-    if resultado:
-        # bloco inteiro num card branco — manual: "blocos de informação em
-        # cards brancos, cantos arredondados, leve elevação"
-        with st.container(border=True, key="card-resumo"):
-            st.subheader("Resumo do processamento")
-            st.dataframe(resultado["arquivos"], width="stretch", hide_index=True)
-            erros = [a for a in resultado["arquivos"] if a["Tipo"] == "erro"]
-            if erros:
-                st.warning(f"{len(erros)} arquivo(s) não puderam ser lidos — veja a "
-                           "coluna Erro acima.")
+perfil = st.session_state.get("perfil")
+if perfil not in (acesso.PERFIL_CONSULTA, acesso.PERFIL_ADMIN):
+    _tela_inicial()
+    st.stop()
 
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Consultas", len(resultado["consultas"]))
-            c2.metric("Regimes", len(resultado["regimes"]))
-            # container próprio só para dar um gancho de CSS à cor de alerta
-            # (ver <style> acima) — o st.metric em si não muda de assinatura
-            with c3, st.container(key="metric-descartes"):
-                st.metric("Descartes registrados", len(resultado["descartes"]))
+with st.sidebar:
+    if st.button("Trocar perfil", key="trocar-perfil"):
+        for chave in ("perfil", "resultado"):
+            st.session_state.pop(chave, None)
+        st.rerun()
 
-            mapa = resultado["mapeamento"]
-            st.caption(
-                f"Mapeado: {mapa['consultas']['novos']} consulta(s) nova(s), "
-                f"{mapa['consultas']['atualizados']} atualizada(s); "
-                f"{mapa['regimes']['novos']} regime(s) novo(s), "
-                f"{mapa['regimes']['atualizados']} atualizado(s)."
-            )
+if perfil == acesso.PERFIL_ADMIN:
+    aba_processar, aba_consultar = st.tabs(["📥 Processar e mapear", "🔎 Consultar"])
+else:
+    aba_processar = None
+    (aba_consultar,) = st.tabs(["🔎 Consultar"])
 
-            if resultado["descartes"]:
-                with st.expander(f"Ver {len(resultado['descartes'])} descartes"):
-                    st.dataframe(resultado["descartes"], width="stretch", hide_index=True)
+if aba_processar is not None:
+  with aba_processar:
+      with st.sidebar:
+          st.header("Como funciona")
+          st.markdown(
+              "1. Envie os PDFs (consultas SEFA e/ou páginas do Diário).\n"
+              "2. A ferramenta detecta o tipo, extrai os campos e mapeia no "
+              "banco local.\n"
+              "3. Use a aba **Consultar** para buscar o que já foi mapeado, "
+              "ou baixe a planilha desta sessão se quiser.\n\n"
+              "Reprocessar o mesmo PDF atualiza o que já estava mapeado, "
+              "sem duplicar."
+          )
+          st.divider()
+          escolha = st.radio(
+              "Tipo do PDF", list(_FORCAR),
+              help="Use 'forçar' se a detecção automática errar.",
+          )
 
-            st.download_button(
-                "⬇️ Baixar planilha desta sessão (.xlsx)", resultado["xlsx"],
-                file_name="mapeamento.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                on_click="ignore",
-            )
-    else:
-        st.info("Envie um ou mais PDFs e clique em **Processar**.")
+      arquivos = st.file_uploader("Arraste os PDFs aqui", type=["pdf"],
+                                  accept_multiple_files=True)
+
+      if arquivos and st.button("▶️ Processar", type="primary"):
+          st.session_state["resultado"] = _processar(arquivos, _FORCAR[escolha])
+
+      # Exibido a partir da sessão, e não de dentro do `if st.button`: assim o
+      # resultado continua na tela depois de qualquer reexecução do script
+      # (por exemplo, o clique em "Baixar").
+      resultado = st.session_state.get("resultado")
+      if resultado:
+          # bloco inteiro num card branco — manual: "blocos de informação em
+          # cards brancos, cantos arredondados, leve elevação"
+          with st.container(border=True, key="card-resumo"):
+              st.subheader("Resumo do processamento")
+              st.dataframe(resultado["arquivos"], width="stretch", hide_index=True)
+              erros = [a for a in resultado["arquivos"] if a["Tipo"] == "erro"]
+              if erros:
+                  st.warning(f"{len(erros)} arquivo(s) não puderam ser lidos — veja a "
+                             "coluna Erro acima.")
+
+              c1, c2, c3 = st.columns(3)
+              c1.metric("Consultas", len(resultado["consultas"]))
+              c2.metric("Regimes", len(resultado["regimes"]))
+              # container próprio só para dar um gancho de CSS à cor de alerta
+              # (ver <style> acima) — o st.metric em si não muda de assinatura
+              with c3, st.container(key="metric-descartes"):
+                  st.metric("Descartes registrados", len(resultado["descartes"]))
+
+              mapa = resultado["mapeamento"]
+              st.caption(
+                  f"Mapeado: {mapa['consultas']['novos']} consulta(s) nova(s), "
+                  f"{mapa['consultas']['atualizados']} atualizada(s); "
+                  f"{mapa['regimes']['novos']} regime(s) novo(s), "
+                  f"{mapa['regimes']['atualizados']} atualizado(s)."
+              )
+
+              if resultado["descartes"]:
+                  with st.expander(f"Ver {len(resultado['descartes'])} descartes"):
+                      st.dataframe(resultado["descartes"], width="stretch", hide_index=True)
+
+              st.download_button(
+                  "⬇️ Baixar planilha desta sessão (.xlsx)", resultado["xlsx"],
+                  file_name="mapeamento.xlsx",
+                  mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                  on_click="ignore",
+              )
+      else:
+          st.info("Envie um ou mais PDFs e clique em **Processar**.")
 
 with aba_consultar:
     conn = _conexao()
