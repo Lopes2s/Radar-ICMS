@@ -90,6 +90,7 @@ _RUIDO_DE_PAGINA = re.compile(
     re.IGNORECASE,
 )
 _RECUO_MINIMO = 10          # pt acima da margem do corpo = recuo de 1ª linha
+_TOLERANCIA_X0 = 2          # pt; x0 a até 2 pt = mesmo alinhamento
 _FATOR_SALTO = 1.4          # salto > 1,4x o espaçamento mediano = novo parágrafo
 _TETO_ESPACAMENTO = 30      # pt; saltos maiores não entram na mediana
 
@@ -97,7 +98,8 @@ _TETO_ESPACAMENTO = 30      # pt; saltos maiores não entram na mediana
 def _marca_paragrafos_da_pagina(linhas: list[dict]) -> list[str]:
     """Devolve o texto de cada linha, prefixado com MARCA_PARAGRAFO quando a
     linha abre um parágrafo: recuo de primeira linha em relação à margem do
-    corpo, ou salto vertical maior que o espaçamento normal da página.
+    corpo (só quando a linha anterior não está no mesmo x0; um bloco citado,
+    inteiro recuado, não é quebrado linha a linha), ou salto vertical maior que o espaçamento normal da página.
 
     A margem do corpo é o x0 mais comum da página (empate: o menor), e o
     espaçamento normal é a mediana dos intervalos entre linhas do corpo —
@@ -120,7 +122,12 @@ def _marca_paragrafos_da_pagina(linhas: list[dict]) -> list[str]:
             saida.append(linha['text'])
             anterior = None
             continue
-        abre = linha['x0'] > margem + _RECUO_MINIMO
+        # Recuo só abre parágrafo se a linha anterior do corpo NÃO estiver no
+        # mesmo x0: num bloco citado todas as linhas ficam no recuo, e a
+        # quebra entre parágrafos da citação vem do salto vertical.
+        abre = (linha['x0'] > margem + _RECUO_MINIMO
+                and (anterior is None
+                     or abs(linha['x0'] - anterior['x0']) > _TOLERANCIA_X0))
         if (not abre and anterior is not None and normal is not None
                 and linha['top'] - anterior['top'] > normal * _FATOR_SALTO):
             abre = True

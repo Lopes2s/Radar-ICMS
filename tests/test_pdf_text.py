@@ -142,3 +142,34 @@ def test_paragrafos_da_resposta_da_consulta_001():
     # o parágrafo anterior: está no texto, mas NÃO abre parágrafo
     assert 'do "caput", os estabelecimentos industriais' in com
     assert M + 'do "caput", os estabelecimentos industriais' not in com
+
+
+def test_bloco_citado_recuado_so_abre_paragrafo_no_salto_vertical():
+    # corpo na margem 36; citação toda em x0=108: 10,9 pt entre linhas do
+    # mesmo parágrafo citado, 19,9 pt entre parágrafos citados
+    linhas = [_l('b1', 36, 100), _l('b2', 36, 112.8), _l('b3', 36, 125.6),
+              _l('b4', 36, 138.4),
+              _l('q1a', 108, 151.2), _l('q1b', 108, 162.1), _l('q1c', 108, 173.0),
+              _l('q2a', 108, 192.9), _l('q2b', 108, 203.8),
+              _l('n1', 36, 226.0), _l('n2', 36, 238.8)]
+    assert pdf_text._marca_paragrafos_da_pagina(linhas) == [
+        'b1', 'b2', 'b3', 'b4',
+        M + 'q1a', 'q1b', 'q1c', M + 'q2a', 'q2b',
+        M + 'n1', 'n2']
+
+
+def test_resposta_da_consulta_001_nao_quebra_citacao_linha_a_linha():
+    from parsers import consultas
+    regs = consultas.parse(pdf_text.texto_simples(_PDF_CONSULTAS),
+                           pdf_text.texto_com_paragrafos(_PDF_CONSULTAS))
+    paragrafos = regs[0]["Resposta"].split("\n\n")
+    assert len(paragrafos) == 22
+    assert any(p.startswith('"Art. 31. Sem prejuízo')
+               and p.endswith('seguintes mercadorias:') for p in paragrafos)
+    assert any(p.startswith('§ 7.º') and p.endswith('serviço de comunicação.')
+               for p in paragrafos)
+    p8 = [p for p in paragrafos if p.startswith('§ 8.º')]
+    assert len(p8) == 1
+    assert 'do "caput", os estabelecimentos industriais' in p8[0]
+    assert len(regs[1]["Resposta"].split("\n\n")) == 5
+    assert len(regs[2]["Resposta"].split("\n\n")) == 3
