@@ -1,0 +1,32 @@
+# Tema visual "ICMS Tech" (Martinelli Advogados).
+# Fonte da verdade: manual de marca "ICMS Tech — Conceito 1c" (anexo).
+# Cada valor comentado abaixo com "manual" veio literalmente de lá; os
+# comentados com "extensão" são decisão de implementação (o manual não
+# cobre esse elemento) — ver lista de decisões na entrega.
+
+[theme]
+base = "light"
+primaryColor = "#1C62CB"            # Azul institucional — manual
+backgroundColor = "#F0F0F0"         # Fundo de página (modo claro) — manual
+secondaryBackgroundColor = "#FFFFFF" # Superfícies/cards (branco) — manual
+textColor = "#262626"               # Grafite — manual
+linkColor = "#1C62CB"               # extensão: reusa o azul institucional
+borderColor = "#E0E0E0"             # extensão: não definido no manual, cinza discreto
+baseRadius = "1rem"                 # cantos arredondados dos cards — manual ("cantos arredondados")
+# Urbanist via Google Fonts — usada no wordmark ("ICMS Tech") e no endosso
+# ("MARTINELLI ADVOGADOS") no manual. Pesos 300/400/600/700 cobrem "ICMS"
+# (700), "Tech" (300) e o endosso (600).
+font = "Urbanist:https://fonts.googleapis.com/css2?family=Urbanist:ital,wght@0,300;0,400;0,600;0,700&display=swap"
+headingFont = "Urbanist:https://fonts.googleapis.com/css2?family=Urbanist:ital,wght@0,300;0,400;0,600;0,700&display=swap"
+
+[theme.sidebar]
+# Sidebar de navegação com fundo escuro grafite/quase preto — manual
+# (mockup "Uso real"). #1A1A1A é mais escuro que o grafite de texto
+# (#262626) para dar contraste de superfície contra o próprio texto
+# grafite usado no resto do app — extensão (o manual não deu um hex
+# específico para o fundo escuro da sidebar, só "grafite/quase preto").
+backgroundColor = "#1A1A1A"
+secondaryBackgroundColor = "#262626"
+textColor = "#F0F0F0"
+primaryColor = "#1C62CB"             # item ativo em destaque azul — manual
+borderColor = "#3A3A3A"              # extensão

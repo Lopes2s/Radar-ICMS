@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.streamlit/*
+!.streamlit/config.toml
+*.xlsx
+mapeamento.db
+
+.pytest_cache/
