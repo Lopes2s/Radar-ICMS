@@ -9,7 +9,7 @@ import pytest
 
 pytest.importorskip("streamlit")
 from streamlit.testing.v1 import AppTest  # noqa: E402
-from core import armazenamento  # noqa: E402
+from core import acesso, armazenamento  # noqa: E402
 
 APP = os.path.join(os.path.dirname(os.path.dirname(__file__)), "app.py")
 
@@ -268,23 +268,24 @@ def test_resposta_antiga_sem_quebras_aparece_como_um_paragrafo():
 
 
 # --- perfis ----------------------------------------------------------------
-def _tela_inicial(secrets=None):
-    at = AppTest.from_file(APP)
-    if secrets is not None:
-        at.secrets["admin"] = secrets
-    return at.run(timeout=30)
+def _tela_inicial(monkeypatch, senha=None):
+    """Tela inicial com a senha de admin controlada pelo teste. Substitui
+    acesso.senha_admin (o app a chama pelo módulo), de modo que um
+    .streamlit/secrets.toml real da máquina nunca influencia o resultado."""
+    monkeypatch.setattr(acesso, "senha_admin", lambda _secrets: senha)
+    return AppTest.from_file(APP).run(timeout=30)
 
 
-def test_abre_na_tela_inicial_sem_abas_nem_uploader():
-    at = _tela_inicial({"senha": "segredo"})
+def test_abre_na_tela_inicial_sem_abas_nem_uploader(monkeypatch):
+    at = _tela_inicial(monkeypatch, "segredo")
     assert not at.exception
     assert len(at.tabs) == 0
     assert len(at.get("file_uploader")) == 0
     assert {b.key for b in at.button} >= {"entrar-consulta", "entrar-admin"}
 
 
-def test_perfil_consulta_ve_so_a_aba_consultar():
-    at = _tela_inicial({"senha": "segredo"})
+def test_perfil_consulta_ve_so_a_aba_consultar(monkeypatch):
+    at = _tela_inicial(monkeypatch, "segredo")
     at.button(key="entrar-consulta").click().run(timeout=30)
     assert not at.exception
     assert len(at.tabs) == 1 and "Consultar" in at.tabs[0].label
@@ -292,8 +293,8 @@ def test_perfil_consulta_ve_so_a_aba_consultar():
     assert "Trocar perfil" in [b.label for b in at.button]
 
 
-def test_admin_com_senha_errada_e_recusado():
-    at = _tela_inicial({"senha": "segredo"})
+def test_admin_com_senha_errada_e_recusado(monkeypatch):
+    at = _tela_inicial(monkeypatch, "segredo")
     at.text_input(key="senha-admin").input("errada")
     at.button(key="entrar-admin").click().run(timeout=30)
     assert not at.exception
@@ -302,8 +303,8 @@ def test_admin_com_senha_errada_e_recusado():
     assert at.session_state.filtered_state.get("perfil") is None
 
 
-def test_admin_com_senha_certa_ve_as_duas_abas():
-    at = _tela_inicial({"senha": "segredo"})
+def test_admin_com_senha_certa_ve_as_duas_abas(monkeypatch):
+    at = _tela_inicial(monkeypatch, "segredo")
     at.text_input(key="senha-admin").input("segredo")
     at.button(key="entrar-admin").click().run(timeout=30)
     assert not at.exception
@@ -312,8 +313,8 @@ def test_admin_com_senha_certa_ve_as_duas_abas():
     assert len(at.get("file_uploader")) == 1
 
 
-def test_sem_senha_configurada_o_botao_admin_fica_desabilitado():
-    at = _tela_inicial()          # nenhum secret definido
+def test_sem_senha_configurada_o_botao_admin_fica_desabilitado(monkeypatch):
+    at = _tela_inicial(monkeypatch)          # nenhum secret definido
     assert at.button(key="entrar-admin").disabled is True
     assert at.text_input(key="senha-admin").disabled is True
     assert any("não configurada" in w.value for w in at.warning)
