@@ -81,6 +81,12 @@ nova: `sqlite3` é da biblioteca padrão do Python.
 - A **Resposta** das consultas é guardada com parágrafos (separados por
   `\n\n`), reconstruídos do layout do PDF; o detalhe na interface mostra um
   bloco por parágrafo e a planilha quebra linha na coluna Resposta.
+  As **citações legais** (trechos de lei/decreto transcritos pelo fisco, em
+  itálico e corpo menor no PDF) aparecem com recuo à esquerda na interface,
+  para diferenciá-las do texto do fisco. A marcação usa um caractere
+  invisível (`MARCA_CITACAO`, em `core/pdf_text.py`) no início do parágrafo:
+  não há prefixo legível no texto guardado, e a planilha o descarta.
+  Sem itálico nem fonte menor no PDF, nenhum parágrafo é tratado como citação.
 - Consultas **já mapeadas** só ganham parágrafos ao **reimportar o PDF**
   (o upsert atualiza o registro, sem duplicar).
 

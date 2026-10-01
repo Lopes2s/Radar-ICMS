@@ -129,15 +129,16 @@ def test_empate_de_margem_escolhe_a_menor():
 def test_texto_com_paragrafos_so_acrescenta_marcas():
     com = pdf_text.texto_com_paragrafos(_PDF_CONSULTAS)
     assert M in com
-    assert com.replace(M, "") == pdf_text.texto_simples(_PDF_CONSULTAS)
+    assert (com.replace(M, "").replace(pdf_text.MARCA_CITACAO, "")
+            == pdf_text.texto_simples(_PDF_CONSULTAS))
 
 
 def test_paragrafos_da_resposta_da_consulta_001():
     com = pdf_text.texto_com_paragrafos(_PDF_CONSULTAS)
     assert M + 'Cabe transcrever' in com
-    assert M + 'Art. 1' in com
-    assert M + 'a) o in' in com
-    assert M + 'II - a receita' in com
+    assert M + pdf_text.MARCA_CITACAO + 'Art. 1' in com   # citação legal
+    assert M + pdf_text.MARCA_CITACAO + 'a) o in' in com   # citação legal
+    assert M + pdf_text.MARCA_CITACAO + 'II - a receita' in com   # citação legal
     # a frase que recomeça logo após o cabeçalho da página seguinte continua
     # o parágrafo anterior: está no texto, mas NÃO abre parágrafo
     assert 'do "caput", os estabelecimentos industriais' in com
@@ -162,7 +163,7 @@ def test_resposta_da_consulta_001_nao_quebra_citacao_linha_a_linha():
     from parsers import consultas
     regs = consultas.parse(pdf_text.texto_simples(_PDF_CONSULTAS),
                            pdf_text.texto_com_paragrafos(_PDF_CONSULTAS))
-    paragrafos = regs[0]["Resposta"].split("\n\n")
+    paragrafos = regs[0]["Resposta"].replace(pdf_text.MARCA_CITACAO, "").split("\n\n")
     assert len(paragrafos) == 22
     assert any(p.startswith('"Art. 31. Sem prejuízo')
                and p.endswith('seguintes mercadorias:') for p in paragrafos)
@@ -173,3 +174,75 @@ def test_resposta_da_consulta_001_nao_quebra_citacao_linha_a_linha():
     assert 'do "caput", os estabelecimentos industriais' in p8[0]
     assert len(regs[1]["Resposta"].split("\n\n")) == 5
     assert len(regs[2]["Resposta"].split("\n\n")) == 3
+
+
+# --- citações legais (recuo) ----------------------------------------------
+C = pdf_text.MARCA_CITACAO
+_CORPO = ('Courier', 12.0)
+_CITA = ('Courier-Oblique', 10.0)
+
+
+def _lc(texto, x0, top, fonte=_CORPO):
+    """Linha com chars (fonte e tamanho), como o extract_text_lines()."""
+    chars = [{'text': c, 'fontname': fonte[0], 'size': fonte[1]}
+             for c in texto if c.strip()]
+    return {'text': texto, 'x0': x0, 'top': top, 'chars': chars}
+
+
+def test_paragrafo_em_fonte_italica_e_citacao_e_o_corpo_nao():
+    linhas = [_lc('corpo 1', 36, 100), _lc('corpo 2', 36, 112.8),
+              _lc('corpo 3', 36, 125.6), _lc('corpo 4', 36, 138.4),
+              _lc('q1 linha um', 108, 160.2, _CITA),
+              _lc('q1 linha dois', 108, 171.1, _CITA),
+              _lc('q2 linha um', 108, 191.0, _CITA),
+              _lc('corpo 5', 36, 213.0)]
+    assert pdf_text._marca_paragrafos_da_pagina(linhas, _CORPO) == [
+        'corpo 1', 'corpo 2', 'corpo 3', 'corpo 4',
+        M + C + 'q1 linha um', 'q1 linha dois', M + C + 'q2 linha um',
+        M + 'corpo 5']
+
+
+def test_troca_de_corpo_para_citacao_sem_salto_vertical_ainda_abre_paragrafo():
+    linhas = [_lc('corpo 1', 36, 100), _lc('corpo 2', 36, 112.8),
+              _lc('q1', 108, 124.0, _CITA), _lc('q1 b', 108, 134.9, _CITA),
+              _lc('corpo 3', 36, 147.7)]
+    saida = pdf_text._marca_paragrafos_da_pagina(linhas, _CORPO)
+    assert saida[2] == M + C + 'q1'
+    assert saida[4] == M + 'corpo 3'
+
+
+def test_fonte_menor_sem_italico_tambem_e_citacao():
+    reta = ('Courier', 10.0)
+    linhas = [_lc('corpo 1', 36, 100), _lc('corpo 2', 36, 112.8),
+              _lc('q1', 108, 134.0, reta), _lc('q1 b', 108, 144.9, reta)]
+    saida = pdf_text._marca_paragrafos_da_pagina(linhas, _CORPO)
+    assert saida[2] == M + C + 'q1'
+
+
+def test_sem_italico_e_sem_fonte_menor_nao_ha_citacao():
+    linhas = [_lc('a', 108, 100), _lc('b', 36, 112.8), _lc('c', 36, 125.6)]
+    assert C not in "".join(pdf_text._marca_paragrafos_da_pagina(linhas, _CORPO))
+
+
+def test_documento_inteiro_em_italico_nao_vira_citacao():
+    # se o corpo do documento já é itálico, itálico não distingue citação
+    italico = ('Courier-Oblique', 12.0)
+    linhas = [_lc('a', 108, 100, italico), _lc('b', 36, 112.8, italico),
+              _lc('c', 36, 125.6, italico)]
+    assert C not in "".join(pdf_text._marca_paragrafos_da_pagina(linhas, italico))
+
+
+def test_linhas_sem_chars_nao_quebram_a_deteccao_de_citacao():
+    linhas = [_l('a', 108, 100), _l('b', 36, 112.8), _l('c', 36, 125.6)]
+    assert C not in "".join(pdf_text._marca_paragrafos_da_pagina(linhas))
+
+
+def test_marcas_de_citacao_na_consulta_001_real():
+    com = pdf_text.texto_com_paragrafos(_PDF_CONSULTAS)
+    assert com.replace(M, "").replace(C, "") == pdf_text.texto_simples(_PDF_CONSULTAS)
+    assert M + C + '"Art. 31. Sem' in com          # citação
+    assert M + C + 'Art. 1' in com                  # citação
+    assert M + C + '50. mat' in com                 # citação
+    assert M + 'Cabe transcrever' in com            # fisco: sem marca de citação
+    assert M + 'A regra de diferimento' in com      # fisco
+    assert M + 'Nos termos do' in com               # fisco

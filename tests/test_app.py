@@ -328,3 +328,28 @@ def test_trocar_perfil_volta_para_a_tela_inicial():
     assert not at.exception
     assert len(at.tabs) == 0
     assert "entrar-consulta" in {b.key for b in at.button}
+
+
+def test_citacao_legal_ganha_recuo_e_o_marcador_invisivel_nunca_aparece():
+    from core import armazenamento as arm
+    from core.pdf_text import MARCA_CITACAO
+    conn = arm.conectar(os.environ["MAPEADOR_BANCO"])
+    arm.criar_esquema(conn)
+    arm.salvar_consultas(conn, [
+        {'Ano': '2026', 'Nº da Consulta': '001', 'Data da Publicação': '',
+         'Protocolo': '', 'Súmula': 'ICMS.', 'Problema da Consulta': 'p',
+         'CNAE Detectado': '',
+         'Resposta': ('Texto do fisco.@@' + MARCA_CITACAO + '"Art. 31. Citado <b>."@@'
+                      'Fisco de novo.').replace('@@', chr(10) * 2)},
+    ])
+    at = _app().run(timeout=30)
+    at.tabs[1].selectbox[0].set_value("consulta").run(timeout=30)
+    at.session_state["tabela-resultados"] = {"selection": {"rows": [0], "columns": []}}
+    at.run(timeout=30)
+    assert not at.exception
+    campo = next(m.value for m in at.markdown if '<p class="icms-resposta-paragrafo' in m.value
+                 and 'Texto do fisco.' in m.value)
+    assert MARCA_CITACAO not in campo
+    assert campo.count('<p class="icms-resposta-paragrafo">') == 2
+    assert ('<p class="icms-resposta-paragrafo icms-resposta-citacao">'
+            '&quot;Art. 31. Citado &lt;b&gt;.&quot;</p>') in campo

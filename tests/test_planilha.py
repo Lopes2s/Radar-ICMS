@@ -132,3 +132,17 @@ def test_resposta_das_consultas_tem_wrap_text_e_coluna_larga_demais_colunas_nao(
         assert not ws.cell(row=2, column=sumula).alignment.wrap_text
         wr = wb["Regimes — a revisar"]
         assert not any(c.alignment.wrap_text for linha in wr.iter_rows(min_row=2) for c in linha)
+
+
+def test_marcador_invisivel_de_citacao_nao_vai_para_a_planilha():
+    from core.pdf_text import MARCA_CITACAO
+    resposta = 'Fisco.' + chr(10) * 2 + MARCA_CITACAO + '"Art. 1 citado."'
+    consultas = [{'Ano': '2026', 'Nº da Consulta': '001', 'Resposta': resposta}]
+    with tempfile.TemporaryDirectory() as d:
+        saida = os.path.join(d, "out.xlsx")
+        planilha.gerar_xlsx(saida, consultas, [], [])
+        ws = load_workbook(saida)["Consultas — a revisar"]
+        col = planilha.COLS_CONSULTAS.index('Resposta') + 1
+        valor = ws.cell(row=2, column=col).value
+        assert MARCA_CITACAO not in valor
+        assert valor == 'Fisco.' + chr(10) * 2 + '"Art. 1 citado."'

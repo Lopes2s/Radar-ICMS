@@ -15,6 +15,7 @@ garantir_dependencias(DEPS_APP)
 import streamlit as st  # noqa: E402
 
 from core import acesso, armazenamento, consulta, pipeline, planilha  # noqa: E402
+from core.pdf_text import MARCA_CITACAO  # noqa: E402
 
 _FORCAR = {"Detectar automaticamente": None,
            "Forçar Consulta": "consulta",
@@ -165,6 +166,11 @@ div[class*="st-key-metric-descartes"] [data-testid="stMetricValue"] {{
     line-height: 1.55;
     text-align: justify;
 }}
+/* Citação legal (lei/decreto transcritos pelo fisco): só o recuo à esquerda,
+   para distinguir a resposta do fisco do texto citado. */
+.icms-resposta-citacao {{
+    margin-left: 2.5rem;
+}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -228,12 +234,20 @@ def _resposta_em_paragrafos(texto: str) -> str:
     """Resposta da consulta como HTML: um <p> por parágrafo ("\\n\\n"), com o
     texto escapado — assim "a)", "1." ou "*" no início de um parágrafo não
     viram lista em Markdown e "<" ou "&" aparecem literalmente. Tudo numa
-    linha só: uma linha em branco encerraria o bloco HTML no Markdown."""
+    linha só: uma linha em branco encerraria o bloco HTML no Markdown. Os
+    parágrafos de citação legal ganham a classe de recuo."""
     paragrafos = [p.strip() for p in texto.split("\n\n") if p.strip()]
-    return "".join(
-        f'<p class="icms-resposta-paragrafo">{html.escape(p)}</p>'
-        for p in paragrafos
-    )
+    saida = []
+    for p in paragrafos:
+        # MARCA_CITACAO (invisível) abre o parágrafo de citação legal: vira a
+        # classe de recuo e nunca chega ao HTML como texto.
+        classe = "icms-resposta-paragrafo"
+        if p.startswith(MARCA_CITACAO):
+            classe += " icms-resposta-citacao"
+        texto_p = p.replace(MARCA_CITACAO, "").strip()
+        if texto_p:
+            saida.append(f'<p class="{classe}">{html.escape(texto_p)}</p>')
+    return "".join(saida)
 
 
 @st.dialog("Detalhes", width="large", on_dismiss=_fecha_selecao_da_tabela)

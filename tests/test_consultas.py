@@ -547,7 +547,39 @@ def test_fixture_real_so_a_resposta_muda_e_sem_perder_texto():
     for b, n in zip(base, novo):
         assert {k: v for k, v in n.items() if k != "Resposta"} == \
                {k: v for k, v in b.items() if k != "Resposta"}
-        assert " ".join(n["Resposta"].split()) == b["Resposta"]
+        assert " ".join(n["Resposta"].replace(C, "").split()) == b["Resposta"]
     assert "\n\n" in novo[0]["Resposta"]
     assert "\n\n" in novo[1]["Resposta"]
     assert "\n\nCabe transcrever" in novo[0]["Resposta"]
+
+
+# --- citações legais na Resposta -------------------------------------------
+from core.pdf_text import MARCA_CITACAO as C  # noqa: E402
+
+
+def test_paragrafo_de_citacao_mantem_o_marcador_no_inicio():
+    plano = _CAB + "Texto do fisco.\nArt. 1 citado.\nDe novo o fisco.\n"
+    com = (_CAB + M + "Texto do fisco.\n" + M + C + "Art. 1 citado.\n"
+           + M + "De novo o fisco.\n")
+    r = consultas.parse(plano, com)[0]
+    assert r["Resposta"] == "Texto do fisco.\n\n" + C + "Art. 1 citado.\n\nDe novo o fisco."
+
+
+def test_marcador_de_citacao_nao_quebra_a_salvaguarda_de_integridade():
+    plano = _CAB + "Um.\nDois.\n"
+    com = _CAB + M + C + "Um.\n" + M + C + "Tres.\n"   # conteúdo diferente
+    assert consultas.parse(plano, com)[0]["Resposta"] == "Um. Dois."
+
+
+def test_fixture_real_marca_16_citacoes_e_6_paragrafos_do_fisco_na_001():
+    pdf = os.path.join(FIX, "Consultas_1_a_3_de_2026.pdf")
+    r = consultas.parse(pdf_text.texto_simples(pdf), pdf_text.texto_com_paragrafos(pdf))[0]
+    paragrafos = r["Resposta"].split("\n\n")
+    citacoes = [p for p in paragrafos if p.startswith(C)]
+    fisco = [p for p in paragrafos if not p.startswith(C)]
+    assert (len(paragrafos), len(citacoes), len(fisco)) == (22, 16, 6)
+    assert [p.startswith(ini) for p, ini in zip(fisco, (
+        'A regra de diferimento', 'Cabe transcrever', 'Nos termos do',
+        'Registre-se', 'Quanto à responsabilidade', 'Na hipótese'))] == [True] * 6
+    plana = consultas.parse(pdf_text.texto_simples(pdf))[0]["Resposta"]
+    assert " ".join(r["Resposta"].replace(C, "").split()) == plana

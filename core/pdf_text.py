@@ -89,17 +89,69 @@ _RUIDO_DE_PAGINA = re.compile(
     r'^(?:_+|\d{1,2}|SECRETARIA DE ESTADO DA FAZENDA.*|SETOR CONSULTIVO)$',
     re.IGNORECASE,
 )
+# Marcador de citação legal (U+2063, "separador invisível"). Vem logo depois
+# de MARCA_PARAGRAFO no início do parágrafo cuja primeira linha é uma citação
+# (trecho de lei/decreto transcrito pelo fisco, em fonte itálica e corpo
+# menor). Invisível de propósito: o texto guardado no banco não ganha nenhum
+# prefixo legível; só a tela (recuo) e a planilha (que o remove) o conhecem.
+MARCA_CITACAO = "\u2063"
+
+_FONTE_ITALICA = re.compile(r'oblique|italic', re.IGNORECASE)
+_DIF_TAMANHO_CITACAO = 1    # pt; fonte menor que o corpo por mais disso = citação
+
 _RECUO_MINIMO = 10          # pt acima da margem do corpo = recuo de 1ª linha
 _TOLERANCIA_X0 = 2          # pt; x0 a até 2 pt = mesmo alinhamento
 _FATOR_SALTO = 1.4          # salto > 1,4x o espaçamento mediano = novo parágrafo
 _TETO_ESPACAMENTO = 30      # pt; saltos maiores não entram na mediana
 
 
-def _marca_paragrafos_da_pagina(linhas: list[dict]) -> list[str]:
+def _fonte_dominante(linha: dict):
+    """(fonte, tamanho) mais comum entre os caracteres da linha, ou None se a
+    linha não traz `chars` (extract_text_lines() sempre traz)."""
+    contagem = Counter((c.get('fontname', ''), round(c.get('size', 0), 1))
+                       for c in linha.get('chars', ()) if c.get('text', '').strip())
+    return contagem.most_common(1)[0][0] if contagem else None
+
+
+def _referencia_do_corpo(linhas: list[dict]):
+    """(fonte, tamanho) dominante do texto corrido, ignorando o ruído de
+    página. Calculada sobre o documento inteiro por texto_com_paragrafos():
+    uma página feita só de citações não pode virar a referência."""
+    contagem = Counter()
+    for l in linhas:
+        if _RUIDO_DE_PAGINA.match(l['text'].strip()):
+            continue
+        for c in l.get('chars', ()):
+            if c.get('text', '').strip():
+                contagem[(c.get('fontname', ''), round(c.get('size', 0), 1))] += 1
+    return contagem.most_common(1)[0][0] if contagem else None
+
+
+def _eh_citacao(linha: dict, corpo_ref) -> bool:
+    """Citação legal: fonte itálica (quando o corpo do documento não é
+    itálico) ou fonte menor que a do corpo. Sem `chars` ou sem referência,
+    nunca é citação — o texto sai como antes."""
+    dominante = _fonte_dominante(linha)
+    if dominante is None or corpo_ref is None:
+        return False
+    fonte, tamanho = dominante
+    fonte_corpo, tamanho_corpo = corpo_ref
+    italica = bool(_FONTE_ITALICA.search(fonte)) and not _FONTE_ITALICA.search(fonte_corpo)
+    menor = tamanho < tamanho_corpo - _DIF_TAMANHO_CITACAO
+    return italica or menor
+
+
+def _marca_paragrafos_da_pagina(linhas: list[dict], corpo_ref=None) -> list[str]:
     """Devolve o texto de cada linha, prefixado com MARCA_PARAGRAFO quando a
     linha abre um parágrafo: recuo de primeira linha em relação à margem do
     corpo (só quando a linha anterior não está no mesmo x0; um bloco citado,
-    inteiro recuado, não é quebrado linha a linha), ou salto vertical maior que o espaçamento normal da página.
+    inteiro recuado, não é quebrado linha a linha), ou salto vertical maior
+    que o espaçamento normal da página.
+
+    Se o parágrafo é uma citação legal (ver _eh_citacao), o prefixo inclui
+    também MARCA_CITACAO; uma troca entre citação e texto do fisco sempre abre
+    parágrafo. `corpo_ref` é a (fonte, tamanho) do corpo do documento; sem
+    ela, vale a da própria página.
 
     A margem do corpo é o x0 mais comum da página (empate: o menor), e o
     espaçamento normal é a mediana dos intervalos entre linhas do corpo —
@@ -116,12 +168,16 @@ def _marca_paragrafos_da_pagina(linhas: list[dict]) -> list[str]:
                   if 0 < b['top'] - a['top'] < _TETO_ESPACAMENTO]
     normal = statistics.median(intervalos) if intervalos else None
 
-    saida, anterior = [], None
+    if corpo_ref is None:
+        corpo_ref = _referencia_do_corpo(linhas)
+
+    saida, anterior, anterior_cita = [], None, False
     for linha in linhas:
         if _RUIDO_DE_PAGINA.match(linha['text'].strip()):
             saida.append(linha['text'])
             anterior = None
             continue
+        cita = _eh_citacao(linha, corpo_ref)
         # Recuo só abre parágrafo se a linha anterior do corpo NÃO estiver no
         # mesmo x0: num bloco citado todas as linhas ficam no recuo, e a
         # quebra entre parágrafos da citação vem do salto vertical.
@@ -131,8 +187,11 @@ def _marca_paragrafos_da_pagina(linhas: list[dict]) -> list[str]:
         if (not abre and anterior is not None and normal is not None
                 and linha['top'] - anterior['top'] > normal * _FATOR_SALTO):
             abre = True
-        saida.append((MARCA_PARAGRAFO if abre else '') + linha['text'])
-        anterior = linha
+        if anterior is not None and cita != anterior_cita:
+            abre = True
+        prefixo = (MARCA_PARAGRAFO + (MARCA_CITACAO if cita else '')) if abre else ''
+        saida.append(prefixo + linha['text'])
+        anterior, anterior_cita = linha, cita
     return saida
 
 
@@ -140,9 +199,9 @@ def texto_com_paragrafos(caminho_pdf: str) -> str:
     """Como texto_simples(), mas com MARCA_PARAGRAFO no início das linhas que
     abrem parágrafo (ver _marca_paragrafos_da_pagina). Usado só para o campo
     Resposta das consultas; o resto do parser segue lendo texto_simples()."""
-    paginas = []
     with pdfplumber.open(caminho_pdf) as pdf:
-        for pagina in pdf.pages:
-            paginas.append("\n".join(
-                _marca_paragrafos_da_pagina(pagina.extract_text_lines())))
+        por_pagina = [pagina.extract_text_lines() for pagina in pdf.pages]
+    corpo_ref = _referencia_do_corpo([l for linhas in por_pagina for l in linhas])
+    paginas = ["\n".join(_marca_paragrafos_da_pagina(linhas, corpo_ref))
+               for linhas in por_pagina]
     return _limpa_ruido_ocr("\n".join(paginas))

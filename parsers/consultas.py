@@ -2,7 +2,7 @@
 import re
 from datetime import datetime
 
-from core.pdf_text import MARCA_PARAGRAFO
+from core.pdf_text import MARCA_CITACAO, MARCA_PARAGRAFO
 
 # Cada página extraída traz cabeçalho E rodapé: o cabeçalho ("SECRETARIA ...
 # DO PARANÁ - SEFA", NA LINHA SEGUINTE "SETOR CONSULTIVO" + traços) abre o
@@ -205,7 +205,9 @@ def _resposta_com_paragrafos(plana: str, fatia_p) -> str:
     if fatia_p is None:
         return plana
     com = _extrai_resposta_em_paragrafos(fatia_p)
-    return com if ' '.join(com.split()) == plana else plana
+    # MARCA_CITACAO não é texto: sai da comparação (e só dela).
+    sem_marcas = com.replace(MARCA_CITACAO, '')
+    return com if ' '.join(sem_marcas.split()) == plana else plana
 
 
 def parse(texto: str, texto_paragrafos: str | None = None) -> list[dict]:

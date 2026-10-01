@@ -3,6 +3,8 @@ from openpyxl import Workbook
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Font, PatternFill, Alignment
 
+from core.pdf_text import MARCA_CITACAO
+
 COLS_CONSULTAS = [
     'Ano', 'Nº da Consulta', 'Data da Publicação', 'Súmula',
     'Problema da Consulta', 'CNAE Detectado', 'Protocolo', 'Resposta',
@@ -35,7 +37,8 @@ def _sanear(valor):
     """
     if not isinstance(valor, str):
         return valor, False
-    valor = ILLEGAL_CHARACTERS_RE.sub('', valor)
+    # MARCA_CITACAO é invisível e só serve à tela (recuo): a planilha não a leva.
+    valor = ILLEGAL_CHARACTERS_RE.sub('', valor.replace(MARCA_CITACAO, ''))
     if len(valor) > _LIMITE_CELULA:
         valor = valor[:_LIMITE_CELULA - len(MARCA_TRUNCADO)] + MARCA_TRUNCADO
     return valor, valor.startswith('=')
