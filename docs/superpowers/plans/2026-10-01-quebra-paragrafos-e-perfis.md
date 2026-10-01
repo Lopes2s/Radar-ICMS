@@ -22,7 +22,7 @@
 - Valores de perfil em `st.session_state["perfil"]`: `"consulta"` ou `"admin"`.
 - Resposta exibida na tela: parágrafos separados em `\n\n`, cada um como `<p class="icms-resposta-paragrafo">` com o texto **escapado** (`html.escape`).
 - `wrap_text=True` na planilha **apenas** na coluna Resposta das consultas.
-- O projeto **não é um repositório git**: onde o modelo de plano diria "commit", cada tarefa termina com um **checkpoint** (suíte completa verde). Não rodar comandos `git`.
+- Repositório git, branch de trabalho **`feat/paragrafos-e-perfis`** (nunca commitar em `main`). Cada tarefa termina com um **checkpoint** (suíte completa verde) **e um commit só com os arquivos da própria tarefa** (`git add <arquivos da tarefa>`, nunca `git add .`). Dentro de uma onda paralela, os sub-agents **não commitam**: só rodam os testes e relatam; o orquestrador faz um commit por tarefa ao fim da onda, após a revisão. Não dar `push`, não mexer em `main`, não reescrever histórico. Mensagens de commit em português, no formato `feat: ...` / `docs: ...` / `test: ...`, terminando com a linha `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`.
 - Texto da interface em português do Brasil.
 
 ## Review Focus
@@ -40,7 +40,7 @@ Entradas que o spec implica mas que nenhum caminho feliz exercita; cada uma tem 
 
 ## Execução com sub-agents
 
-Os arquivos de cada tarefa são disjuntos dentro de cada onda, então tarefas da mesma onda podem rodar em **paralelo** (uma chamada `Agent` por tarefa, todas na mesma mensagem). Sem git, não há worktree: os agentes trabalham no mesmo diretório, por isso **nunca** coloque na mesma onda duas tarefas que editem o mesmo arquivo.
+Os arquivos de cada tarefa são disjuntos dentro de cada onda, então tarefas da mesma onda podem rodar em **paralelo** (uma chamada `Agent` por tarefa, todas na mesma mensagem). Os agentes de uma onda trabalham no mesmo diretório (sem worktree, e por isso sem commitar), então **nunca** coloque na mesma onda duas tarefas que editem o mesmo arquivo.
 
 | Onda | Tarefas (paralelas entre si) | Depende de | Arquivos tocados |
 |---|---|---|---|
@@ -242,6 +242,15 @@ Se `test_texto_com_paragrafos_so_acrescenta_marcas` falhar, **não ajuste o test
 
 Run: `python -m pytest -q`
 Expected: todos passam (136 + os novos), nenhum teste existente alterado.
+
+- [ ] **Commit da tarefa** (pelo orquestrador; em onda paralela, só depois de a onda ser revista)
+
+```bash
+git add core/pdf_text.py tests/test_pdf_text.py
+git commit -m "feat: texto_com_paragrafos marca o início de parágrafo pela geometria do PDF
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+```
 
 ---
 
@@ -458,6 +467,15 @@ Expected: PASS.
 Run: `python -m pytest -q`
 Expected: todos passam. Conferir com `python -m pytest tests/test_regimes.py -q` que os testes de regime seguem verdes sem edição.
 
+- [ ] **Commit da tarefa** (pelo orquestrador; em onda paralela, só depois de a onda ser revista)
+
+```bash
+git add parsers/consultas.py core/pipeline.py tests/test_consultas.py tests/test_pipeline.py
+git commit -m "feat: Resposta das consultas com parágrafos, com fallback para o texto achatado
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+```
+
 ---
 
 ### Task 3: Exibição da Resposta em parágrafos (tela) e `wrap_text` (planilha)
@@ -606,6 +624,15 @@ Expected: PASS.
 Run: `python -m pytest -q`
 Expected: todos passam.
 
+- [ ] **Commit da tarefa** (pelo orquestrador; em onda paralela, só depois de a onda ser revista)
+
+```bash
+git add core/planilha.py app.py tests/test_planilha.py tests/test_app.py
+git commit -m "feat: Resposta em parágrafos na tela e wrap_text na planilha
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+```
+
 ---
 
 ### Task 4: `core/acesso.py` (senha e perfis)
@@ -739,6 +766,15 @@ Expected: PASS.
 
 Run: `python -m pytest -q`
 Expected: todos passam.
+
+- [ ] **Commit da tarefa** (pelo orquestrador; em onda paralela, só depois de a onda ser revista)
+
+```bash
+git add core/acesso.py tests/test_acesso.py
+git commit -m "feat: módulo de acesso com senha do administrador e perfis
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+```
 
 ---
 
@@ -939,6 +975,15 @@ Expected: PASS (antigos e novos).
 Run: `python -m pytest -q`
 Expected: todos passam.
 
+- [ ] **Commit da tarefa** (pelo orquestrador; em onda paralela, só depois de a onda ser revista)
+
+```bash
+git add app.py tests/test_app.py .gitignore .streamlit/secrets.toml.example
+git commit -m "feat: tela inicial com perfis Consulta e Administrador
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+```
+
 ---
 
 ### Task 6: Documentação e verificação final
@@ -994,3 +1039,12 @@ Subir com `python iniciar.py` (com um `.streamlit/secrets.toml` temporário cont
 
 Run: `python -m pytest -q`
 Expected: verde. Relatar: total de testes, resultado do passo 3, e o que do passo 4 foi ou não verificado.
+
+- [ ] **Commit da tarefa** (pelo orquestrador; em onda paralela, só depois de a onda ser revista)
+
+```bash
+git add README.md docs/superpowers/specs/2026-10-01-quebra-paragrafos-e-perfis-design.md
+git commit -m "docs: README com perfis, senha e parágrafos na Resposta
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+```
