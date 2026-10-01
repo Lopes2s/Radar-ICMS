@@ -488,3 +488,66 @@ def test_cnae_com_n_ordinal():
 def test_cnae_citado_so_na_resposta_nao_e_atribuido_a_consulente():
     assert _cnae_de("A consulente informa.",
                     resposta="Empresas do CNAE 1091-1/01 não se enquadram.") == ""
+
+
+# --- Resposta com parágrafos ----------------------------------------------
+from core.pdf_text import MARCA_PARAGRAFO as M  # noqa: E402
+
+_CAB = "CONSULTA Nº 001, de 19 de janeiro de 2026.\nSÚMULA: ICMS. TESTE.\nA consulente expõe.\nRESPOSTA\n"
+_RODAPE_E_CABECALHO = ("__________\n1\nSECRETARIA DE ESTADO DA FAZENDA DO PARANÁ - SEFA\n"
+                       "SETOR CONSULTIVO\n__________\n")
+
+
+def test_resposta_sai_com_paragrafos_separados_por_linha_em_branco():
+    plano = _CAB + "Primeiro paragrafo linha um\nlinha dois.\nSegundo paragrafo.\n"
+    com = _CAB + M + "Primeiro paragrafo linha um\nlinha dois.\n" + M + "Segundo paragrafo.\n"
+    r = consultas.parse(plano, com)[0]
+    assert r["Resposta"] == "Primeiro paragrafo linha um linha dois.\n\nSegundo paragrafo."
+
+
+def test_paragrafo_que_atravessa_a_pagina_continua_um_so():
+    corpo_plano = "Primeiro começa\n" + _RODAPE_E_CABECALHO + "continua aqui.\nSegundo.\n"
+    corpo_com = M + "Primeiro começa\n" + _RODAPE_E_CABECALHO + "continua aqui.\n" + M + "Segundo.\n"
+    r = consultas.parse(_CAB + corpo_plano, _CAB + corpo_com)[0]
+    assert r["Resposta"] == "Primeiro começa continua aqui.\n\nSegundo."
+
+
+def test_sem_texto_com_paragrafos_a_resposta_sai_achatada_como_antes():
+    plano = _CAB + "Um.\nDois.\n"
+    assert consultas.parse(plano)[0]["Resposta"] == "Um. Dois."
+    assert consultas.parse(plano, None)[0]["Resposta"] == "Um. Dois."
+    assert consultas.parse(plano, "")[0]["Resposta"] == "Um. Dois."
+
+
+def test_texto_com_paragrafos_divergente_cai_no_achatado():
+    plano = _CAB + "Um.\nDois.\n"
+    # conteúdo diferente (falta uma palavra): a salvaguarda recusa
+    assert consultas.parse(plano, _CAB + M + "Um.\n" + M + "Tres.\n")[0]["Resposta"] == "Um. Dois."
+    # âncora com outra data: não casa, cai no achatado
+    outra = _CAB.replace("19 de janeiro", "20 de janeiro") + M + "Um.\n" + M + "Dois.\n"
+    assert consultas.parse(plano, outra)[0]["Resposta"] == "Um. Dois."
+
+
+def test_ancora_repetida_no_texto_com_paragrafos_cai_no_achatado():
+    plano = _CAB + "Um.\nDois.\n"
+    duplicada = (_CAB + M + "Um.\n" + M + "Dois.\n") * 2
+    assert consultas.parse(plano, duplicada)[0]["Resposta"] == "Um. Dois."
+
+
+def test_resposta_vazia_continua_vazia_com_texto_de_paragrafos():
+    plano = "CONSULTA Nº 001, de 19 de janeiro de 2026.\nSÚMULA: X.\nA consulente expõe.\n"
+    assert consultas.parse(plano, plano)[0]["Resposta"] == ""
+
+
+def test_fixture_real_so_a_resposta_muda_e_sem_perder_texto():
+    pdf = os.path.join(FIX, "Consultas_1_a_3_de_2026.pdf")
+    base = consultas.parse(pdf_text.texto_simples(pdf))
+    novo = consultas.parse(pdf_text.texto_simples(pdf), pdf_text.texto_com_paragrafos(pdf))
+    assert len(novo) == len(base) == 3
+    for b, n in zip(base, novo):
+        assert {k: v for k, v in n.items() if k != "Resposta"} == \
+               {k: v for k, v in b.items() if k != "Resposta"}
+        assert " ".join(n["Resposta"].split()) == b["Resposta"]
+    assert "\n\n" in novo[0]["Resposta"]
+    assert "\n\n" in novo[1]["Resposta"]
+    assert "\n\nCabe transcrever" in novo[0]["Resposta"]

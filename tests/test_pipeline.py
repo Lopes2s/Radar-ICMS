@@ -112,3 +112,53 @@ def test_descartes_registram_o_arquivo_de_origem(monkeypatch):
     lote = pipeline.Lote()
     pipeline.processar_arquivo(lote, KRONA_PDF, "krona.pdf")
     assert lote.descartes[0]['Arquivo'] == 'krona.pdf'
+
+
+# --- Resposta com parágrafos no pipeline ----------------------------------
+def test_pipeline_entrega_resposta_com_paragrafos_e_demais_campos_iguais():
+    import os
+    from core import pdf_text
+    from parsers import consultas as p_consultas
+    pdf = os.path.join(os.path.dirname(__file__), "fixtures", "Consultas_1_a_3_de_2026.pdf")
+    lote = pipeline.Lote()
+    pipeline.processar_arquivo(lote, pdf, "c.pdf")
+    base = p_consultas.parse(pdf_text.texto_simples(pdf))
+    assert len(lote.consultas) == len(base) == 3
+    assert "\n\n" in lote.consultas[0]["Resposta"]
+    for b, n in zip(base, lote.consultas):
+        assert {k: v for k, v in n.items() if k != "Resposta"} == \
+               {k: v for k, v in b.items() if k != "Resposta"}
+
+
+def test_pipeline_de_regime_nao_foi_tocado():
+    import os
+    from core import pdf_text
+    from parsers import regimes as p_regimes
+    pdf = os.path.join(os.path.dirname(__file__), "fixtures", "Regime_Krona_2col.pdf")
+    lote = pipeline.Lote()
+    pipeline.processar_arquivo(lote, pdf, "r.pdf")
+    esperado, _ = p_regimes.parse(pdf_text.texto_por_colunas(pdf))
+    assert lote.regimes == esperado
+
+
+def test_reimportar_pdf_atualiza_resposta_achatada_do_banco_sem_duplicar(tmp_path):
+    import os
+    from core import armazenamento, consulta
+    pdf = os.path.join(os.path.dirname(__file__), "fixtures", "Consultas_1_a_3_de_2026.pdf")
+    conn = armazenamento.conectar(str(tmp_path / "t.db"))
+    armazenamento.criar_esquema(conn)
+    # registro antigo, achatado, com a mesma chave natural (Ano + Nº)
+    armazenamento.salvar_consultas(conn, [
+        {'Ano': '2026', 'Nº da Consulta': '001', 'Data da Publicação': '2026-01-19',
+         'Protocolo': '', 'Súmula': 'velha', 'Problema da Consulta': '',
+         'CNAE Detectado': '', 'Resposta': 'antiga achatada'}])
+    for _ in range(2):  # duas vezes: também prova idempotência
+        lote = pipeline.Lote()
+        pipeline.processar_arquivo(lote, pdf, "c.pdf")
+        pipeline.finalizar(lote)
+        armazenamento.persistir_lote(conn, lote)
+    achados = consulta.buscar(conn, "consulta")
+    assert len(achados) == 3
+    r001 = next(r for r in achados if r["Nº da Consulta"] == "001")
+    assert "\n\n" in r001["Resposta"]
+    assert r001["Resposta"] != "antiga achatada"

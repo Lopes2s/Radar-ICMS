@@ -52,7 +52,8 @@ def processar_arquivo(lote: Lote, caminho: str, nome: str,
     try:
         tipo = forcar or pdf_text.detecta_fonte(caminho)
         if tipo == 'consulta':
-            regs = p_consultas.parse(pdf_text.texto_simples(caminho))
+            regs = p_consultas.parse(pdf_text.texto_simples(caminho),
+                                     pdf_text.texto_com_paragrafos(caminho))
             lote.consultas.extend(regs)
             linha['Consultas'] = len(regs)
         elif tipo == 'regime':

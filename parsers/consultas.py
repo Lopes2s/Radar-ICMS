@@ -2,6 +2,8 @@
 import re
 from datetime import datetime
 
+from core.pdf_text import MARCA_PARAGRAFO
+
 # Cada página extraída traz cabeçalho E rodapé: o cabeçalho ("SECRETARIA ...
 # DO PARANÁ - SEFA", NA LINHA SEGUINTE "SETOR CONSULTIVO" + traços) abre o
 # texto da página; o rodapé (traços + número da página, em linha própria)
@@ -163,10 +165,54 @@ def _extrai_protocolo(antes_do_titulo: str) -> str:
     return '; '.join(_NUMERO_PROTOCOLO.findall(linhas[-1]))
 
 
-def parse(texto: str) -> list[dict]:
+def _extrai_resposta_em_paragrafos(fatia_p: str) -> str:
+    """Como _extrai_resposta(), mas parte da fatia do texto com
+    MARCA_PARAGRAFO: junta as linhas de cada parágrafo com espaço e separa os
+    parágrafos com linha em branco ("\\n\\n")."""
+    m = re.search(r'\bRESPOSTA\b', fatia_p)
+    if not m:
+        return ""
+    resto = fatia_p[m.end():]
+    m_protocolo = _PROTOCOLO_DA_PROXIMA.search(resto)
+    fim = m_protocolo.start() if m_protocolo else len(resto)
+    paragrafos = (re.sub(r'\s+', ' ', p).strip()
+                  for p in resto[:fim].split(MARCA_PARAGRAFO))
+    return '\n\n'.join(p for p in paragrafos if p)
+
+
+def _fatias_por_consulta(texto_paragrafos: str) -> dict:
+    """Fatia o texto com marcadores pelas mesmas âncoras de parse() e indexa
+    por (número, data ISO). Chave repetida é descartada: sem como saber qual
+    fatia é de qual consulta, vale o texto achatado."""
+    limpo = _CABECALHO.sub('\n', texto_paragrafos)
+    ancoras = list(_ANCORA.finditer(limpo))
+    fatias, repetidas = {}, set()
+    for i, anc in enumerate(ancoras):
+        fim = ancoras[i + 1].start() if i + 1 < len(ancoras) else len(limpo)
+        chave = (anc.group(1).zfill(3), _data_extenso_para_iso(anc.group(2)))
+        if chave in fatias:
+            repetidas.add(chave)
+        fatias[chave] = limpo[anc.start():fim]
+    for chave in repetidas:
+        del fatias[chave]
+    return fatias
+
+
+def _resposta_com_paragrafos(plana: str, fatia_p) -> str:
+    """Troca a Resposta achatada pela versão com parágrafos só se ela tiver
+    EXATAMENTE o mesmo texto (normalizada): parágrafos só acrescentam quebras,
+    nunca alteram conteúdo. Qualquer divergência cai no achatado."""
+    if fatia_p is None:
+        return plana
+    com = _extrai_resposta_em_paragrafos(fatia_p)
+    return com if ' '.join(com.split()) == plana else plana
+
+
+def parse(texto: str, texto_paragrafos: str | None = None) -> list[dict]:
     limpo = _CABECALHO.sub('\n', texto)
     ano_m = re.search(r'ANO:\s*(\d{4})', limpo)
     ano_doc = ano_m.group(1) if ano_m else ""
+    fatias_p = _fatias_por_consulta(texto_paragrafos) if texto_paragrafos else {}
 
     ancoras = list(_ANCORA.finditer(limpo))
     registros = []
@@ -189,6 +235,6 @@ def parse(texto: str) -> list[dict]:
             'Súmula': _extrai_sumula(fatia),
             'Problema da Consulta': problema,
             'CNAE Detectado': _extrai_cnae(problema),
-            'Resposta': _extrai_resposta(fatia),
+            'Resposta': _resposta_com_paragrafos(_extrai_resposta(fatia), fatias_p.get((numero, data_iso))),
         })
     return registros
