@@ -1,5 +1,7 @@
 # core/pdf_text.py
 import re
+import statistics
+from collections import Counter
 import pdfplumber
 
 
@@ -71,3 +73,69 @@ def detecta_fonte(caminho_pdf: str) -> str:
             or "DIÁRIO" in amostra):
         return "regime"
     return "desconhecido"
+
+
+# Marcador de início de parágrafo (U+2029, "separador de parágrafo").
+# Prefixa a linha que abre um parágrafo. Não é uma linha em branco porque a
+# limpeza de cabeçalho/rodapé do parser deixa linhas em branco no MEIO de
+# parágrafos que atravessam a página; o marcador não tem essa ambiguidade.
+# Removendo-o, o texto é idêntico ao de texto_simples().
+MARCA_PARAGRAFO = "\u2029"
+
+# Linhas que se repetem em toda página e que o parser descarta: traços,
+# número de página (1-2 dígitos) e o cabeçalho "SECRETARIA ... / SETOR
+# CONSULTIVO". Nunca abrem parágrafo e interrompem a referência de salto.
+_RUIDO_DE_PAGINA = re.compile(
+    r'^(?:_+|\d{1,2}|SECRETARIA DE ESTADO DA FAZENDA.*|SETOR CONSULTIVO)$',
+    re.IGNORECASE,
+)
+_RECUO_MINIMO = 10          # pt acima da margem do corpo = recuo de 1ª linha
+_FATOR_SALTO = 1.4          # salto > 1,4x o espaçamento mediano = novo parágrafo
+_TETO_ESPACAMENTO = 30      # pt; saltos maiores não entram na mediana
+
+
+def _marca_paragrafos_da_pagina(linhas: list[dict]) -> list[str]:
+    """Devolve o texto de cada linha, prefixado com MARCA_PARAGRAFO quando a
+    linha abre um parágrafo: recuo de primeira linha em relação à margem do
+    corpo, ou salto vertical maior que o espaçamento normal da página.
+
+    A margem do corpo é o x0 mais comum da página (empate: o menor), e o
+    espaçamento normal é a mediana dos intervalos entre linhas do corpo —
+    ambos derivados da própria página, não valores fixos.
+    """
+    corpo = [l for l in linhas if not _RUIDO_DE_PAGINA.match(l['text'].strip())]
+    if not corpo:
+        return [l['text'] for l in linhas]
+
+    contagem = Counter(round(l['x0']) for l in corpo)
+    maior = max(contagem.values())
+    margem = min(x for x, n in contagem.items() if n == maior)
+    intervalos = [b['top'] - a['top'] for a, b in zip(corpo, corpo[1:])
+                  if 0 < b['top'] - a['top'] < _TETO_ESPACAMENTO]
+    normal = statistics.median(intervalos) if intervalos else None
+
+    saida, anterior = [], None
+    for linha in linhas:
+        if _RUIDO_DE_PAGINA.match(linha['text'].strip()):
+            saida.append(linha['text'])
+            anterior = None
+            continue
+        abre = linha['x0'] > margem + _RECUO_MINIMO
+        if (not abre and anterior is not None and normal is not None
+                and linha['top'] - anterior['top'] > normal * _FATOR_SALTO):
+            abre = True
+        saida.append((MARCA_PARAGRAFO if abre else '') + linha['text'])
+        anterior = linha
+    return saida
+
+
+def texto_com_paragrafos(caminho_pdf: str) -> str:
+    """Como texto_simples(), mas com MARCA_PARAGRAFO no início das linhas que
+    abrem parágrafo (ver _marca_paragrafos_da_pagina). Usado só para o campo
+    Resposta das consultas; o resto do parser segue lendo texto_simples()."""
+    paginas = []
+    with pdfplumber.open(caminho_pdf) as pdf:
+        for pagina in pdf.pages:
+            paginas.append("\n".join(
+                _marca_paragrafos_da_pagina(pagina.extract_text_lines())))
+    return _limpa_ruido_ocr("\n".join(paginas))
