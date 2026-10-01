@@ -35,6 +35,15 @@ def dedup(linhas, campos):
     return unicos
 
 
+def _texto_com_paragrafos_ou_none(caminho: str):
+    """Texto com marcas de parágrafo, ou None se a extração falhar: os
+    parágrafos são um acréscimo; sem eles a Resposta sai achatada como antes."""
+    try:
+        return pdf_text.texto_com_paragrafos(caminho)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def processar_arquivo(lote: Lote, caminho: str, nome: str,
                       forcar: str | None = None) -> dict:
     """Processa um PDF, acumula no `lote` e devolve a linha do arquivo.
@@ -53,7 +62,7 @@ def processar_arquivo(lote: Lote, caminho: str, nome: str,
         tipo = forcar or pdf_text.detecta_fonte(caminho)
         if tipo == 'consulta':
             regs = p_consultas.parse(pdf_text.texto_simples(caminho),
-                                     pdf_text.texto_com_paragrafos(caminho))
+                                     _texto_com_paragrafos_ou_none(caminho))
             lote.consultas.extend(regs)
             linha['Consultas'] = len(regs)
         elif tipo == 'regime':

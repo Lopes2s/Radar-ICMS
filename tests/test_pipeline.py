@@ -162,3 +162,19 @@ def test_reimportar_pdf_atualiza_resposta_achatada_do_banco_sem_duplicar(tmp_pat
     r001 = next(r for r in achados if r["Nº da Consulta"] == "001")
     assert "\n\n" in r001["Resposta"]
     assert r001["Resposta"] != "antiga achatada"
+
+
+def test_falha_nos_paragrafos_cai_no_texto_achatado(monkeypatch):
+    from parsers import consultas
+
+    def _quebra(caminho):
+        raise RuntimeError("falha nos parágrafos")
+
+    monkeypatch.setattr(pipeline.pdf_text, "texto_com_paragrafos", _quebra)
+    lote = pipeline.Lote()
+    linha = pipeline.processar_arquivo(lote, CONSULTAS_PDF, "c.pdf")
+    assert linha["Tipo"] == "consulta"
+    assert linha["Erro"] == ""
+    assert linha["Consultas"] == 3
+    achatado = consultas.parse(pdf_text.texto_simples(CONSULTAS_PDF))
+    assert [r["Resposta"] for r in lote.consultas] == [r["Resposta"] for r in achatado]
