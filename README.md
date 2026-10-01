@@ -27,6 +27,29 @@ O servidor escuta apenas em `127.0.0.1` — a ferramenta não fica exposta na re
 do escritório — e a telemetria do streamlit fica desligada. Se a porta 8501
 estiver ocupada, a próxima livre é usada automaticamente.
 
+Ao abrir, a interface mostra a **tela inicial** com dois perfis: **Consulta**
+(entra direto; só a aba "🔎 Consultar") e **Administrador** (exige senha; abre
+também a aba "📥 Processar e mapear", onde se importam PDFs). Na barra lateral
+há o botão **Trocar perfil**, que volta à tela inicial. Atualizar a página
+(F5) também volta à tela inicial, pois o perfil vive só na sessão.
+
+## Perfis e senha do Administrador
+A senha fica em `.streamlit/secrets.toml`, que não é versionado. Copie o
+modelo `.streamlit/secrets.toml.example` e troque a senha:
+
+    [admin]
+    senha = "troque-esta-senha"
+
+Sem o arquivo (ou com a seção/chave ausente, vazia ou que não seja texto), o
+perfil Administrador fica **desabilitado** — nunca cai em acesso aberto; o
+perfil Consulta continua funcionando. A lógica está em `core/acesso.py`.
+
+Limites, a rever na hospedagem multiusuário:
+- a senha é texto puro no disco: protege contra uso acidental da interface,
+  não contra quem tem acesso ao arquivo;
+- `processar.py` (CLI) não tem restrição de perfil;
+- não há bloqueio por tentativas erradas de senha.
+
 ## Uso (linha de comando)
 
     python processar.py <pasta_com_pdfs> [--banco arquivo.db] [--xlsx saida.xlsx]
@@ -55,6 +78,13 @@ nova: `sqlite3` é da biblioteca padrão do Python.
   como `.xlsx` (`core/consulta.exportar_xlsx`) — a planilha continua no
   escopo, mas como extração a partir do que foi pesquisado, não mais como
   o produto de uma sessão de processamento.
+- A **Resposta** das consultas é guardada com parágrafos (separados por
+  `
+
+`), reconstruídos do layout do PDF; o detalhe na interface mostra um
+  bloco por parágrafo e a planilha quebra linha na coluna Resposta.
+- Consultas **já mapeadas** só ganham parágrafos ao **reimportar o PDF**
+  (o upsert atualiza o registro, sem duplicar).
 
 ## Testes
 As dependências de desenvolvimento ficam separadas das de uso:
@@ -95,7 +125,9 @@ autor) nem caches:
     git archive --format=zip -o mapeador_pr.zip HEAD
 
 ## Estrutura
-- core/pdf_text.py  — extração de texto (1 coluna, 2 colunas, detecção de fonte)
+- core/pdf_text.py  — extração de texto (1 coluna, 2 colunas, detecção de fonte);
+  `texto_com_paragrafos` reconstrói os parágrafos da Resposta
+- core/acesso.py    — perfis (Consulta/Administrador) e conferência da senha
 - parsers/consultas.py — parser das consultas
 - parsers/regimes.py   — parser dos regimes (filtra concessões/alterações)
 - core/pipeline.py  — processamento por arquivo e lote, comum à CLI e à interface
@@ -117,9 +149,11 @@ autor) nem caches:
   para isso — confirmado: uma base com CNPJ/CNAE será encaminhada depois
   para preencher essas colunas.
 - Vínculo com a carteira de clientes.
-- Autenticação/controle de acesso na interface e hospedagem fora da rede
-  interna (o servidor continua só em `127.0.0.1`) — os dados mapeados são
-  públicos (SEFA-PR/Diário Oficial), mas essa mudança não foi decidida.
+- Controle de acesso além do perfil Administrador com senha local (ver
+  *Perfis e senha do Administrador*). Continuam pendentes: usuários
+  individuais, hospedagem fora da rede interna (o servidor continua só em
+  `127.0.0.1`) e banco em rede — os dados mapeados são públicos
+  (SEFA-PR/Diário Oficial), mas essa mudança não foi decidida.
   **Planejado para depois:** hospedar a ferramenta para uso simultâneo por
   vários usuários, com banco de dados em rede. Isso implica trocar o SQLite
   local (`core/armazenamento.py`) por um banco cliente-servidor (o caminho
@@ -128,3 +162,6 @@ autor) nem caches:
 
 ## Limitações conhecidas
 - Padrões de vigência cobrem os casos vistos; podem existir outros no histórico.
+- Layouts de PDF muito diferentes dos fixtures podem exigir ajuste dos
+  limiares de `_marca_paragrafos_da_pagina` (`core/pdf_text.py`); se a
+  detecção falhar, a Resposta cai no texto achatado de sempre.
