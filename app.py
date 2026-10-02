@@ -318,7 +318,7 @@ def _tela_inicial():
         st.caption("Importar PDFs e reprocessar o banco. Exige senha.")
         if esperada is None:
             st.warning("Senha do administrador não configurada. Crie "
-                       ".streamlit/secrets.toml (veja secrets.toml.example).")
+                       ".streamlit/secrets.toml com a seção [admin] e a chave senha (veja o README).")
         senha = st.text_input("Senha", type="password", key="senha-admin",
                               disabled=esperada is None)
         if st.button("Entrar como administrador", key="entrar-admin",

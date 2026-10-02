@@ -34,8 +34,9 @@ há o botão **Trocar perfil**, que volta à tela inicial. Atualizar a página
 (F5) também volta à tela inicial, pois o perfil vive só na sessão.
 
 ## Perfis e senha do Administrador
-A senha fica em `.streamlit/secrets.toml`, que não é versionado. Copie o
-modelo `.streamlit/secrets.toml.example` e troque a senha:
+A senha fica em `.streamlit/secrets.toml`, que não é versionado e precisa ser
+criado em cada máquina onde a ferramenta for usada. Crie o arquivo com este
+conteúdo, trocando a senha:
 
     [admin]
     senha = "troque-esta-senha"
