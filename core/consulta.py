@@ -70,3 +70,12 @@ def exportar_busca(tipo: str, texto=None, ano=None, caminho_bd=None) -> bytes:
     usada ali."""
     with armazenamento.aberta(caminho_bd) as conn:
         return exportar_xlsx(tipo, buscar(conn, tipo, texto, ano))
+
+
+def historico(conn, tipo: str, registro: dict) -> list:
+    """Versões anteriores do ato (consulta ou regime), da mais recente para a
+    mais antiga. `registro` precisa conter as colunas da chave natural."""
+    if tipo not in TIPOS:
+        raise ValueError(f"tipo deve ser um de {TIPOS}: {tipo!r}")
+    chave = {c: registro.get(c, '') for c in CHAVES[tipo]}
+    return armazenamento.historico_de(conn, _TABELAS[tipo], chave)

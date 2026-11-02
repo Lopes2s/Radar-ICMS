@@ -365,3 +365,77 @@ def test_buscar_detalhe_pela_chave_natural(tmp_path):
 def test_colunas_da_lista_incluem_a_chave_natural():
     assert set(pipeline.CHAVE_CONSULTAS) <= set(armazenamento.COLUNAS_LISTA_CONSULTAS)
     assert set(pipeline.CHAVE_REGIMES) <= set(armazenamento.COLUNAS_LISTA_REGIMES)
+
+
+def test_reimportar_registro_identico_nao_cria_historico(tmp_path):
+    conn = _conn(tmp_path)
+    reg = _consulta(**{'Súmula': 'ICMS'})
+    armazenamento.salvar_consultas(conn, [reg])
+    armazenamento.salvar_consultas(conn, [reg])
+    chave = {'Ano': '2026', 'Nº da Consulta': '001'}
+    assert armazenamento.historico_de(conn, 'consultas', chave) == []
+
+
+def test_reimportar_com_campo_diferente_cria_uma_linha_de_historico(tmp_path):
+    conn = _conn(tmp_path)
+    armazenamento.salvar_consultas(conn, [_consulta(Protocolo='')])
+    resultado = armazenamento.salvar_consultas(conn, [_consulta(Protocolo='25.152.191-3')])
+
+    assert resultado == {'novos': 0, 'atualizados': 1}  # contrato inalterado
+    chave = {'Ano': '2026', 'Nº da Consulta': '001'}
+    historico = armazenamento.historico_de(conn, 'consultas', chave)
+    assert len(historico) == 1
+    assert historico[0]['campos_alterados'] == ['Protocolo']
+    assert historico[0]['registro_anterior']['Protocolo'] == ''
+    assert historico[0]['versao_app']
+    assert armazenamento.buscar_consultas(conn)[0]['Protocolo'] == '25.152.191-3'
+
+
+def test_historico_vem_do_mais_recente_para_o_mais_antigo(tmp_path):
+    conn = _conn(tmp_path)
+    for protocolo in ('1', '2', '3'):
+        armazenamento.salvar_consultas(conn, [_consulta(Protocolo=protocolo)])
+    chave = {'Ano': '2026', 'Nº da Consulta': '001'}
+    anteriores = [h['registro_anterior']['Protocolo']
+                  for h in armazenamento.historico_de(conn, 'consultas', chave)]
+    assert anteriores == ['2', '1']
+
+
+def test_historico_de_regime_usa_a_chave_numero_mais_cnpj(tmp_path):
+    conn = _conn(tmp_path)
+    base = {'ANO': '2026', 'Nº DO REGIME ESPECIAL': '1/2026',
+            'CNPJ REQUERENTE': '11', 'EMENTA': 'a'}
+    armazenamento.salvar_regimes(conn, [base])
+    armazenamento.salvar_regimes(conn, [{**base, 'EMENTA': 'b'}])
+    chave = {'Nº DO REGIME ESPECIAL': '1/2026', 'CNPJ REQUERENTE': '11'}
+    assert armazenamento.historico_de(conn, 'regimes', chave)[0]['campos_alterados'] == ['EMENTA']
+
+
+def test_persistir_lote_registra_as_importacoes_sem_mudar_o_retorno(tmp_path):
+    conn = _conn(tmp_path)
+    lote = pipeline.Lote(
+        consultas=[_consulta()],
+        importacoes=[{'arquivo': 'c.pdf', 'sha256': 'abc', 'tipo': 'consulta',
+                      'n_registros': 1}])
+    resultado = armazenamento.persistir_lote(conn, lote)
+    assert resultado == {'consultas': {'novos': 1, 'atualizados': 0},
+                         'regimes': {'novos': 0, 'atualizados': 0}}
+    linha = conn.execute("SELECT * FROM importacoes").fetchone()
+    assert (linha['arquivo'], linha['sha256'], linha['tipo'], linha['n_registros']) == \
+           ('c.pdf', 'abc', 'consulta', 1)
+    assert linha['importado_em'] and linha['versao_app']
+
+
+def test_schema_sobe_para_a_versao_2_e_banco_v1_e_migrado(tmp_path):
+    conn = armazenamento.conectar(str(tmp_path / "v1.db"))
+    armazenamento.criar_esquema(conn)
+    conn.execute("DROP TABLE historico")
+    conn.execute("DROP TABLE importacoes")
+    conn.execute("PRAGMA user_version = 1")
+    conn.commit()
+
+    armazenamento.criar_esquema(conn)
+
+    assert armazenamento.versao_do_schema(conn) == 2
+    conn.execute("SELECT COUNT(*) FROM historico")
+    conn.execute("SELECT COUNT(*) FROM importacoes")

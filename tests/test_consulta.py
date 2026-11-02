@@ -125,3 +125,13 @@ def test_buscar_lista_tipo_invalido_levanta_erro(tmp_path):
     with armazenamento.sessao(str(tmp_path / "l.db")) as c:
         with pytest.raises(ValueError):
             consulta.buscar_lista(c, 'outro')
+
+
+def test_historico_do_registro_por_tipo(tmp_path):
+    with armazenamento.sessao(str(tmp_path / "h.db")) as c:
+        base = {'Ano': '2026', 'Nº da Consulta': '001', 'Protocolo': ''}
+        armazenamento.salvar_consultas(c, [base])
+        armazenamento.salvar_consultas(c, [{**base, 'Protocolo': 'x'}])
+        itens = consulta.historico(c, 'consulta', base)
+        assert len(itens) == 1
+        assert itens[0]['campos_alterados'] == ['Protocolo']
