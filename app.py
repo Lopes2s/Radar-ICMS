@@ -482,7 +482,7 @@ if aba_processar is not None:
                   on_click="ignore",
               )
       else:
-          st.info("Envie um ou mais PDFs e clique em **Processar**.")
+          st.info("Envie um ou mais PDFs e clique em **Analisar**.")
 
 def _renderiza_consultar(conn):
     # Painel de busca no estilo da tela de referência (busca de normas):
