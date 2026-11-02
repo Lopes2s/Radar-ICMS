@@ -136,3 +136,13 @@ def test_saida_com_acento_nao_quebra_em_console_ascii(tmp_path, monkeypatch):
     assert codigo == 0  # sucesso não pode virar código 1 só por causa do print
     saida = buf.getvalue().decode('ascii')
     assert "Consultas" in saida  # os acentos viraram '?', mas não travou
+
+
+def test_processar_grava_o_log_na_pasta_de_dados(tmp_path):
+    pasta = tmp_path / "pdfs"
+    pasta.mkdir()
+    shutil.copy(os.path.join(FIX, "Consultas_1_a_3_de_2026.pdf"), pasta / "c.pdf")
+
+    processar.main([str(pasta), "--banco", str(tmp_path / "m.db")])
+
+    assert os.path.exists(os.path.join(os.environ["MAPEADOR_DADOS"], "logs", "app.log"))

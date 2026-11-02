@@ -14,8 +14,10 @@ garantir_dependencias(DEPS_APP)
 
 import streamlit as st  # noqa: E402
 
-from core import acesso, armazenamento, consulta, pipeline, planilha  # noqa: E402
+from core import acesso, armazenamento, consulta, log, pipeline, planilha  # noqa: E402
 from core.pdf_text import MARCA_CITACAO  # noqa: E402
+
+log.configurar_log(armazenamento.pasta_dados())
 
 _FORCAR = {"Detectar automaticamente": None,
            "Forçar Consulta": "consulta",

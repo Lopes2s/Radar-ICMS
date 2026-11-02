@@ -39,7 +39,9 @@ def main(argv=None) -> int:
     # dentro do main (e não no import) para que importar este módulo — nos
     # testes, por exemplo — nunca dispare um pip install.
     garantir_dependencias(DEPS_CLI)
-    from core import armazenamento, pipeline, planilha  # noqa: E402
+    from core import armazenamento, log, pipeline, planilha  # noqa: E402
+
+    log.configurar_log(armazenamento.pasta_dados())
 
     lote = pipeline.Lote()
     for caminho in pdfs:

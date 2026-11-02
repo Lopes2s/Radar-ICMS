@@ -4,11 +4,14 @@
 Processa um PDF por vez e acumula o resultado num Lote. Uma falha num PDF
 vira uma linha de erro em `lote.arquivos` e nunca interrompe os demais.
 """
+import logging
 from dataclasses import dataclass, field
 
 from core import pdf_text
 from parsers import consultas as p_consultas
 from parsers import regimes as p_regimes
+
+log = logging.getLogger('mapeador')
 
 CHAVE_CONSULTAS = ['Ano', 'Nº da Consulta']
 CHAVE_REGIMES = ['Nº DO REGIME ESPECIAL', 'CNPJ REQUERENTE']
@@ -41,6 +44,8 @@ def _texto_com_paragrafos_ou_none(caminho: str):
     try:
         return pdf_text.texto_com_paragrafos(caminho)
     except Exception:  # noqa: BLE001
+        log.warning('parágrafos indisponíveis para %s; usando texto achatado',
+                    caminho, exc_info=True)
         return None
 
 
@@ -75,6 +80,7 @@ def processar_arquivo(lote: Lote, caminho: str, nome: str,
             linha['Descartes'] = len(desc)
         linha['Tipo'] = tipo
     except Exception as erro:  # noqa: BLE001 — um PDF ruim não pode matar o lote
+        log.error('falha ao processar %s', nome, exc_info=True)
         linha['Tipo'] = 'erro'
         linha['Erro'] = f"{type(erro).__name__}: {erro}"
     lote.arquivos.append(linha)

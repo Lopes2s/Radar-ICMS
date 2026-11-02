@@ -1,4 +1,5 @@
 # tests/test_pipeline.py
+import logging
 import os
 import shutil
 
@@ -178,3 +179,12 @@ def test_falha_nos_paragrafos_cai_no_texto_achatado(monkeypatch):
     assert linha["Consultas"] == 3
     achatado = consultas.parse(pdf_text.texto_simples(CONSULTAS_PDF))
     assert [r["Resposta"] for r in lote.consultas] == [r["Resposta"] for r in achatado]
+
+
+def test_falha_ao_processar_e_registrada_no_log_com_traceback(tmp_path, caplog):
+    ruim = tmp_path / "corrompido.pdf"
+    ruim.write_bytes(b"isto nao e um pdf")
+    with caplog.at_level(logging.ERROR, logger="mapeador"):
+        pipeline.processar_arquivo(pipeline.Lote(), str(ruim), "corrompido.pdf")
+    assert any("corrompido.pdf" in r.getMessage() and r.exc_info
+               for r in caplog.records)
