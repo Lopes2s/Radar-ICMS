@@ -1,4 +1,6 @@
 # tests/test_armazenamento.py
+import pytest
+
 from core import armazenamento, pipeline
 
 
@@ -249,3 +251,36 @@ def test_sessao_cria_o_esquema_e_fecha_mesmo_com_erro(tmp_path):
             raise RuntimeError("falha")
     with pytest.raises(sqlite3.ProgrammingError):
         conn.execute("SELECT 1")
+
+
+def test_criar_esquema_grava_a_versao_do_schema(tmp_path):
+    conn = _conn(tmp_path)
+    assert armazenamento.versao_do_schema(conn) == armazenamento.SCHEMA_VERSAO
+
+
+def test_banco_antigo_sem_versao_e_atualizado_sem_perder_dados(tmp_path):
+    conn = armazenamento.conectar(str(tmp_path / "antigo.db"))
+    conn.execute('CREATE TABLE consultas ("Ano" TEXT, "Nº da Consulta" TEXT, '
+                 'UNIQUE("Ano", "Nº da Consulta"))')
+    conn.execute("INSERT INTO consultas VALUES (?, ?)", ("2025", "007"))
+    conn.commit()
+    assert armazenamento.versao_do_schema(conn) == 0
+
+    armazenamento.criar_esquema(conn)
+
+    assert armazenamento.versao_do_schema(conn) == armazenamento.SCHEMA_VERSAO
+    assert armazenamento.buscar_consultas(conn)[0]["Nº da Consulta"] == "007"
+
+
+def test_banco_de_versao_mais_nova_e_recusado_sem_ser_alterado(tmp_path):
+    conn = armazenamento.conectar(str(tmp_path / "novo.db"))
+    conn.execute(f"PRAGMA user_version = {armazenamento.SCHEMA_VERSAO + 1}")
+    conn.commit()
+
+    with pytest.raises(armazenamento.SchemaMaisNovo) as exc:
+        armazenamento.criar_esquema(conn)
+
+    assert str(armazenamento.SCHEMA_VERSAO + 1) in str(exc.value)
+    criou = conn.execute(
+        "SELECT name FROM sqlite_master WHERE name = 'consultas'").fetchone()
+    assert criou is None

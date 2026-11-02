@@ -357,3 +357,15 @@ def test_citacao_legal_ganha_recuo_e_o_marcador_invisivel_nunca_aparece():
             'style="margin-left:2.5rem">'
             '&quot;Art. 31. Citado &lt;b&gt;.&quot;</p>') in campo
     assert campo.count('style="margin-left') == 1   # só a citação, não o fisco
+
+
+def test_banco_de_versao_mais_nova_mostra_erro_amigavel():
+    conn = armazenamento.conectar(os.environ["MAPEADOR_BANCO"])
+    conn.execute(f"PRAGMA user_version = {armazenamento.SCHEMA_VERSAO + 1}")
+    conn.commit()
+    conn.close()
+
+    at = _app().run(timeout=30)
+
+    assert not at.exception
+    assert any("mais nova" in e.value for e in at.error)

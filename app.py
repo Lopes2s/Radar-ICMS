@@ -335,6 +335,13 @@ if perfil not in (acesso.PERFIL_CONSULTA, acesso.PERFIL_ADMIN):
     _tela_inicial()
     st.stop()
 
+try:
+    with armazenamento.sessao(_CAMINHO_BANCO):
+        pass
+except armazenamento.SchemaMaisNovo as erro:
+    st.error(str(erro))
+    st.stop()
+
 with st.sidebar:
     if st.button("Trocar perfil", key="trocar-perfil"):
         for chave in ("perfil", "resultado"):

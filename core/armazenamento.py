@@ -26,6 +26,16 @@ COLUNAS_REGIMES = [
     'ABRANGÊNCIA', 'BENEFÍCIOS/PROCEDIMENTOS', 'DISPOSIÇÕES GERAIS',
 ]
 
+SCHEMA_VERSAO = 1
+
+
+class SchemaMaisNovo(RuntimeError):
+    """O banco foi criado por uma versão mais nova da ferramenta."""
+
+
+def versao_do_schema(conn: sqlite3.Connection) -> int:
+    return conn.execute('PRAGMA user_version').fetchone()[0]
+
 
 def pasta_dados() -> str:
     """Pasta do banco e dos logs: `MAPEADOR_DADOS` ou a raiz do projeto.
@@ -123,9 +133,22 @@ def _criar_tabela(conn: sqlite3.Connection, tabela: str, colunas: list,
 
 
 def criar_esquema(conn: sqlite3.Connection) -> None:
-    """Cria as tabelas de consultas e regimes se não existirem. Idempotente."""
+    """Cria/atualiza as tabelas. Idempotente e só aditivo.
+
+    Recusa (SchemaMaisNovo) um banco criado por versão mais nova, ANTES de
+    mexer em qualquer coisa. O `user_version` só é regravado quando muda, para
+    que abrir o banco a cada rerun da interface não tome o bloqueio de escrita.
+    """
+    atual = versao_do_schema(conn)
+    if atual > SCHEMA_VERSAO:
+        raise SchemaMaisNovo(
+            f"Este banco foi criado por uma versão mais nova da ferramenta "
+            f"(schema {atual}; esta versão conhece até {SCHEMA_VERSAO}). "
+            f"Atualize a ferramenta antes de abrir este banco.")
     _criar_tabela(conn, 'consultas', COLUNAS_CONSULTAS, CHAVE_CONSULTAS)
     _criar_tabela(conn, 'regimes', COLUNAS_REGIMES, CHAVE_REGIMES)
+    if atual != SCHEMA_VERSAO:
+        conn.execute(f'PRAGMA user_version = {SCHEMA_VERSAO}')
     conn.commit()
 
 
