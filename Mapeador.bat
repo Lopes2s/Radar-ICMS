@@ -31,6 +31,20 @@ if not defined PY (
     exit /b 1
 )
 
+REM Ambiente isolado: as dependencias ficam em .venv, sem mexer no Python global.
+if not exist ".venv\Scripts\python.exe" (
+    echo   Preparando o ambiente isolado ^(so na primeira vez^)...
+    %PY% -m venv .venv
+    if errorlevel 1 (
+        echo.
+        echo   [ERRO] Nao foi possivel criar o ambiente .venv.
+        echo.
+        pause
+        exit /b 1
+    )
+)
+set "PY=.venv\Scripts\python.exe"
+
 %PY% iniciar.py
 set "ERR=%ERRORLEVEL%"
 
