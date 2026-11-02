@@ -26,10 +26,23 @@ COLUNAS_REGIMES = [
 ]
 
 
+def pasta_dados() -> str:
+    """Pasta do banco e dos logs: `MAPEADOR_DADOS` ou a raiz do projeto.
+    É criada se não existir."""
+    pasta = os.environ.get('MAPEADOR_DADOS') or _RAIZ
+    os.makedirs(pasta, exist_ok=True)
+    return pasta
+
+
+def caminho_do_banco(caminho_bd: str | None = None) -> str:
+    """Precedência: argumento > MAPEADOR_BANCO > <pasta_dados>/mapeamento.db."""
+    return (caminho_bd or os.environ.get('MAPEADOR_BANCO')
+            or os.path.join(pasta_dados(), 'mapeamento.db'))
+
+
 def conectar(caminho_bd: str | None = None) -> sqlite3.Connection:
-    """Abre (ou cria) o banco. Sem `caminho_bd`, usa mapeamento.db na raiz
-    do projeto."""
-    conn = sqlite3.connect(caminho_bd or _CAMINHO_PADRAO)
+    """Abre (ou cria) o banco (ver `caminho_do_banco` para a escolha do arquivo)."""
+    conn = sqlite3.connect(caminho_do_banco(caminho_bd))
     conn.row_factory = sqlite3.Row
     return conn
 

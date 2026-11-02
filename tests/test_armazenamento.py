@@ -193,3 +193,37 @@ def test_persistir_lote_grava_consultas_e_regimes_de_uma_vez(tmp_path):
                          'regimes': {'novos': 1, 'atualizados': 0}}
     assert len(armazenamento.buscar_consultas(conn)) == 1
     assert len(armazenamento.buscar_regimes(conn)) == 1
+
+
+import os
+
+
+def test_pasta_dados_usa_a_variavel_e_cria_a_pasta(tmp_path, monkeypatch):
+    alvo = tmp_path / "dados" / "fundo"
+    monkeypatch.setenv("MAPEADOR_DADOS", str(alvo))
+    assert armazenamento.pasta_dados() == str(alvo)
+    assert alvo.is_dir()
+
+
+def test_pasta_dados_sem_variavel_e_a_raiz_do_projeto(monkeypatch):
+    monkeypatch.delenv("MAPEADOR_DADOS", raising=False)
+    assert armazenamento.pasta_dados() == armazenamento._RAIZ
+
+
+def test_caminho_do_banco_respeita_a_precedencia(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAPEADOR_DADOS", str(tmp_path))
+    monkeypatch.delenv("MAPEADOR_BANCO", raising=False)
+    assert armazenamento.caminho_do_banco() == os.path.join(str(tmp_path), "mapeamento.db")
+    monkeypatch.setenv("MAPEADOR_BANCO", str(tmp_path / "x.db"))
+    assert armazenamento.caminho_do_banco() == str(tmp_path / "x.db")
+    assert armazenamento.caminho_do_banco("explicito.db") == "explicito.db"
+
+
+def test_conectar_sem_caminho_cai_na_pasta_de_dados(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAPEADOR_DADOS", str(tmp_path))
+    monkeypatch.delenv("MAPEADOR_BANCO", raising=False)
+    conn = armazenamento.conectar()
+    conn.execute("CREATE TABLE t (x)")
+    conn.commit()
+    conn.close()
+    assert (tmp_path / "mapeamento.db").exists()
