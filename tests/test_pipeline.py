@@ -1,4 +1,5 @@
 # tests/test_pipeline.py
+import hashlib
 import logging
 import os
 import shutil
@@ -244,3 +245,40 @@ def test_finalizar_aceita_o_criterio():
     lote = pipeline.Lote(consultas=[_c('a', Resposta=''), _c('b', Resposta='t')])
     pipeline.finalizar(lote, criterio='completo')
     assert [r['x'] for r in lote.consultas] == ['b']
+
+
+def test_processar_arquivo_registra_hash_e_origem():
+    lote = pipeline.Lote()
+    pipeline.processar_arquivo(lote, CONSULTAS_PDF, "consultas.pdf")
+
+    with open(CONSULTAS_PDF, "rb") as fh:
+        esperado = hashlib.sha256(fh.read()).hexdigest()
+    assert lote.importacoes == [{'arquivo': 'consultas.pdf', 'sha256': esperado,
+                                 'tipo': 'consulta', 'n_registros': 3}]
+    r = lote.consultas[0]
+    assert lote.origem[('consulta', r['Ano'], r['Nº da Consulta'])] == 'consultas.pdf'
+
+
+def test_origem_de_regime_usa_numero_e_cnpj():
+    lote = pipeline.Lote()
+    pipeline.processar_arquivo(lote, KRONA_PDF, "krona.pdf")
+    r = lote.regimes[0]
+    chave = ('regime', r['Nº DO REGIME ESPECIAL'], r['CNPJ REQUERENTE'])
+    assert lote.origem[chave] == 'krona.pdf'
+    assert lote.importacoes[0]['tipo'] == 'regime'
+    assert lote.importacoes[0]['n_registros'] == 2
+
+
+def test_arquivo_com_erro_nao_gera_importacao(tmp_path):
+    ruim = tmp_path / "corrompido.pdf"
+    ruim.write_bytes(b"isto nao e um pdf")
+    lote = pipeline.Lote()
+    pipeline.processar_arquivo(lote, str(ruim), "corrompido.pdf")
+    assert lote.importacoes == []
+    assert lote.origem == {}
+
+
+def test_linha_do_arquivo_continua_com_as_seis_chaves():
+    lote = pipeline.Lote()
+    linha = pipeline.processar_arquivo(lote, CONSULTAS_PDF, "consultas.pdf")
+    assert list(linha) == ['Arquivo', 'Tipo', 'Consultas', 'Regimes', 'Descartes', 'Erro']

@@ -4,6 +4,7 @@
 Processa um PDF por vez e acumula o resultado num Lote. Uma falha num PDF
 vira uma linha de erro em `lote.arquivos` e nunca interrompe os demais.
 """
+import hashlib
 import logging
 import re
 from dataclasses import dataclass, field
@@ -26,6 +27,10 @@ class Lote:
     descartes: list = field(default_factory=list)
     # uma linha por PDF: Arquivo, Tipo, Consultas, Regimes, Descartes, Erro
     arquivos: list = field(default_factory=list)
+    # um item por PDF lido: {'arquivo', 'sha256', 'tipo', 'n_registros'}
+    importacoes: list = field(default_factory=list)
+    # ('consulta', Ano, Nº) / ('regime', Nº RE, CNPJ) -> nome do 1º arquivo de origem
+    origem: dict = field(default_factory=dict)
 
 
 CRITERIOS_DEDUP = ('primeira', 'completo', 'recente')
@@ -83,6 +88,14 @@ def _texto_com_paragrafos_ou_none(caminho: str):
         return None
 
 
+def _sha256(caminho: str) -> str:
+    resumo = hashlib.sha256()
+    with open(caminho, 'rb') as fh:
+        for bloco in iter(lambda: fh.read(1 << 20), b''):
+            resumo.update(bloco)
+    return resumo.hexdigest()
+
+
 def processar_arquivo(lote: Lote, caminho: str, nome: str,
                       forcar: str | None = None) -> dict:
     """Processa um PDF, acumula no `lote` e devolve a linha do arquivo.
@@ -104,6 +117,11 @@ def processar_arquivo(lote: Lote, caminho: str, nome: str,
                                      _texto_com_paragrafos_ou_none(caminho))
             lote.consultas.extend(regs)
             linha['Consultas'] = len(regs)
+            for r in regs:
+                lote.origem.setdefault(
+                    ('consulta', r.get('Ano', ''), r.get('Nº da Consulta', '')), nome)
+            lote.importacoes.append({'arquivo': nome, 'sha256': _sha256(caminho),
+                                     'tipo': tipo, 'n_registros': len(regs)})
         elif tipo == 'regime':
             regs, desc = p_regimes.parse(pdf_text.texto_por_colunas(caminho))
             for d in desc:
@@ -112,6 +130,12 @@ def processar_arquivo(lote: Lote, caminho: str, nome: str,
             lote.descartes.extend(desc)
             linha['Regimes'] = len(regs)
             linha['Descartes'] = len(desc)
+            for r in regs:
+                lote.origem.setdefault(
+                    ('regime', r.get('Nº DO REGIME ESPECIAL', ''),
+                     r.get('CNPJ REQUERENTE', '')), nome)
+            lote.importacoes.append({'arquivo': nome, 'sha256': _sha256(caminho),
+                                     'tipo': tipo, 'n_registros': len(regs)})
         linha['Tipo'] = tipo
     except Exception as erro:  # noqa: BLE001 — um PDF ruim não pode matar o lote
         log.error('falha ao processar %s', nome, exc_info=True)
