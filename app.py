@@ -440,8 +440,8 @@ def _renderiza_consultar(conn):
             anos = consulta.anos_disponiveis(conn, tipo)
             ano = st.selectbox("Ano do ato", ["Todos"] + anos)
 
-    resultados = consulta.buscar(conn, tipo, texto=texto or None,
-                                 ano=None if ano == "Todos" else ano)
+    ano_filtro = None if ano == "Todos" else ano
+    resultados = consulta.buscar(conn, tipo, texto=texto or None, ano=ano_filtro)
 
     with st.container(border=True, key="card-consultar"):
         st.markdown('<div class="icms-resultado-barra">RESULTADO DA PESQUISA</div>',
@@ -463,7 +463,8 @@ def _renderiza_consultar(conn):
         if resultados:
             st.download_button(
                 "⬇️ Baixar estes resultados (.xlsx)",
-                consulta.exportar_xlsx(tipo, resultados),
+                lambda: consulta.exportar_busca(tipo, texto or None, ano_filtro,
+                                                _CAMINHO_BANCO),
                 file_name=f"{tipo}s_filtrados.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 on_click="ignore",

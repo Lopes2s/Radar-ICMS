@@ -38,3 +38,13 @@ def exportar_xlsx(tipo: str, resultados: list) -> bytes:
     else:
         planilha.gerar_xlsx(buf, regimes=resultados)
     return buf.getvalue()
+
+
+def exportar_busca(tipo: str, texto=None, ano=None, caminho_bd=None) -> bytes:
+    """Refaz a busca com conexão PRÓPRIA e devolve o .xlsx.
+
+    O `st.download_button` executa esta função numa thread à parte, quando o
+    usuário clica; uma conexão SQLite aberta em outra thread não pode ser
+    usada ali."""
+    with armazenamento.aberta(caminho_bd) as conn:
+        return exportar_xlsx(tipo, buscar(conn, tipo, texto, ano))

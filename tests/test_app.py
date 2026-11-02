@@ -369,3 +369,22 @@ def test_banco_de_versao_mais_nova_mostra_erro_amigavel():
 
     assert not at.exception
     assert any("mais nova" in e.value for e in at.error)
+
+
+def test_renderizar_a_aba_nao_gera_o_xlsx(monkeypatch):
+    # a planilha só pode ser montada quando o usuário clica em "Baixar"
+    conn = armazenamento.conectar(os.environ["MAPEADOR_BANCO"])
+    armazenamento.criar_esquema(conn)
+    armazenamento.salvar_consultas(conn, [
+        {'Ano': '2026', 'Nº da Consulta': '001', 'Súmula': 'ICMS'},
+    ])
+    conn.close()
+
+    def _nao_deve_rodar(*args, **kwargs):
+        raise AssertionError("xlsx gerado sem clique")
+
+    monkeypatch.setattr("core.consulta.exportar_xlsx", _nao_deve_rodar)
+
+    at = _app().run(timeout=30)
+
+    assert not at.exception

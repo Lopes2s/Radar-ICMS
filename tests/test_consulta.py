@@ -2,6 +2,7 @@
 import io
 
 import pytest
+from openpyxl import load_workbook
 from core import armazenamento, consulta
 
 
@@ -84,3 +85,19 @@ def test_exportar_xlsx_sem_resultados_ainda_gera_planilha_valida():
 def test_exportar_xlsx_tipo_invalido_levanta_erro():
     with pytest.raises(ValueError):
         consulta.exportar_xlsx('algo_que_nao_existe', [])
+
+
+def test_exportar_busca_abre_conexao_propria_e_devolve_xlsx(tmp_path):
+    caminho = str(tmp_path / "e.db")
+    with armazenamento.sessao(caminho) as c:
+        armazenamento.salvar_consultas(c, [
+            {'Ano': '2026', 'Nº da Consulta': '001', 'Súmula': 'ICMS',
+             'Problema da Consulta': 'madeira'},
+            {'Ano': '2026', 'Nº da Consulta': '002', 'Súmula': 'ICMS',
+             'Problema da Consulta': 'soja'},
+        ])
+
+    dados = consulta.exportar_busca('consulta', texto='madeira', caminho_bd=caminho)
+
+    ws = load_workbook(io.BytesIO(dados))['Consultas — a revisar']
+    assert ws.max_row == 2  # cabeçalho + 1 resultado
