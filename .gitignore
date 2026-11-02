@@ -6,3 +6,5 @@ __pycache__/
 mapeamento.db
 
 .pytest_cache/
+logs/
+.venv/
