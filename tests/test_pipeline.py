@@ -282,3 +282,17 @@ def test_linha_do_arquivo_continua_com_as_seis_chaves():
     lote = pipeline.Lote()
     linha = pipeline.processar_arquivo(lote, CONSULTAS_PDF, "consultas.pdf")
     assert list(linha) == ['Arquivo', 'Tipo', 'Consultas', 'Regimes', 'Descartes', 'Erro']
+
+
+def test_falha_no_hash_nao_deixa_o_lote_pela_metade(monkeypatch):
+    def _quebra(caminho):
+        raise OSError("sem acesso")
+    monkeypatch.setattr(pipeline, "_sha256", _quebra)
+    lote = pipeline.Lote()
+
+    linha = pipeline.processar_arquivo(lote, CONSULTAS_PDF, "c.pdf")
+
+    assert linha['Tipo'] == 'erro'
+    assert lote.consultas == []
+    assert lote.origem == {}
+    assert lote.importacoes == []

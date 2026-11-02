@@ -208,3 +208,32 @@ def test_banco_de_versao_mais_nova_sai_com_1_e_mensagem(tmp_path, capsys):
 
     assert codigo == 1
     assert "mais nova" in capsys.readouterr().err
+
+
+def test_schema_mais_novo_tambem_lista_o_arquivo_com_erro(tmp_path, capsys):
+    pasta = _pasta_com(tmp_path, corrompido=True)
+    banco = tmp_path / "m.db"
+    conn = armazenamento.conectar(str(banco))
+    conn.execute(f"PRAGMA user_version = {armazenamento.SCHEMA_VERSAO + 1}")
+    conn.commit()
+    conn.close()
+
+    codigo = processar.main([str(pasta), "--banco", str(banco)])
+
+    assert codigo == 1
+    err = capsys.readouterr().err
+    assert "mais nova" in err
+    assert "corrompido.pdf" in err
+
+
+def test_opcao_nao_aceita_outra_flag_como_valor(tmp_path, capsys, monkeypatch):
+    pasta = _pasta_com(tmp_path)
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+
+    codigo = processar.main([str(pasta), "--banco", "--dedup", "completo"])
+
+    assert codigo == 1
+    assert "Uso:" in capsys.readouterr().out
+    assert not (cwd / "--dedup").exists()

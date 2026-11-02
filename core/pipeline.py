@@ -115,17 +115,19 @@ def processar_arquivo(lote: Lote, caminho: str, nome: str,
         if tipo == 'consulta':
             regs = p_consultas.parse(pdf_text.texto_simples(caminho),
                                      _texto_com_paragrafos_ou_none(caminho))
+            sha = _sha256(caminho)
             lote.consultas.extend(regs)
             linha['Consultas'] = len(regs)
             for r in regs:
                 lote.origem.setdefault(
                     ('consulta', r.get('Ano', ''), r.get('Nº da Consulta', '')), nome)
-            lote.importacoes.append({'arquivo': nome, 'sha256': _sha256(caminho),
+            lote.importacoes.append({'arquivo': nome, 'sha256': sha,
                                      'tipo': tipo, 'n_registros': len(regs)})
         elif tipo == 'regime':
             regs, desc = p_regimes.parse(pdf_text.texto_por_colunas(caminho))
             for d in desc:
                 d['Arquivo'] = nome
+            sha = _sha256(caminho)
             lote.regimes.extend(regs)
             lote.descartes.extend(desc)
             linha['Regimes'] = len(regs)
@@ -134,7 +136,7 @@ def processar_arquivo(lote: Lote, caminho: str, nome: str,
                 lote.origem.setdefault(
                     ('regime', r.get('Nº DO REGIME ESPECIAL', ''),
                      r.get('CNPJ REQUERENTE', '')), nome)
-            lote.importacoes.append({'arquivo': nome, 'sha256': _sha256(caminho),
+            lote.importacoes.append({'arquivo': nome, 'sha256': sha,
                                      'tipo': tipo, 'n_registros': len(regs)})
         linha['Tipo'] = tipo
     except Exception as erro:  # noqa: BLE001 — um PDF ruim não pode matar o lote

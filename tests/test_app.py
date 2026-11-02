@@ -456,3 +456,11 @@ def test_trocar_perfil_descarta_a_analise_pendente():
     at = _com_analise(_lote_com_uma_consulta()).run(timeout=30)
     at.button(key="trocar-perfil").click().run(timeout=30)
     assert "analise" not in at.session_state
+
+
+def test_analise_de_outros_arquivos_e_descartada():
+    at = _com_analise(_lote_com_uma_consulta())
+    at.session_state["analise"]["nomes"] = ("outro.pdf",)
+    at.run(timeout=30)
+    assert "analise" not in at.session_state
+    assert not any(b.key == "gravar" for b in at.button)

@@ -62,7 +62,7 @@ registro fica quando o mesmo ato aparece em mais de um arquivo (padrão:
 planilha aberta no Excel ou banco de versão mais nova; 2 = algum PDF falhou
 (os demais foram gravados) — cada erro é listado, por arquivo, em stderr.
 
-Sem `--banco`, usa `mapeamento.db` na raiz do projeto. Reprocessar a mesma
+Sem `--banco`, usa `MAPEADOR_BANCO` se definido; senão `mapeamento.db` na pasta de dados (`MAPEADOR_DADOS`, padrão: a raiz do projeto). Reprocessar a mesma
 pasta não duplica: cada consulta/regime já mapeado é atualizado (upsert pela
 chave natural), não repetido. `--xlsx` é totalmente opcional — sem ele,
 nenhuma planilha é gerada.

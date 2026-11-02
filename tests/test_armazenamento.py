@@ -1,4 +1,7 @@
 # tests/test_armazenamento.py
+import os
+import sqlite3
+
 import pytest
 
 from core import armazenamento, pipeline
@@ -197,9 +200,6 @@ def test_persistir_lote_grava_consultas_e_regimes_de_uma_vez(tmp_path):
     assert len(armazenamento.buscar_regimes(conn)) == 1
 
 
-import os
-
-
 def test_pasta_dados_usa_a_variavel_e_cria_a_pasta(tmp_path, monkeypatch):
     alvo = tmp_path / "dados" / "fundo"
     monkeypatch.setenv("MAPEADOR_DADOS", str(alvo))
@@ -229,11 +229,6 @@ def test_conectar_sem_caminho_cai_na_pasta_de_dados(tmp_path, monkeypatch):
     conn.commit()
     conn.close()
     assert (tmp_path / "mapeamento.db").exists()
-
-
-import sqlite3
-
-import pytest
 
 
 def test_aberta_fecha_a_conexao_ao_sair(tmp_path):

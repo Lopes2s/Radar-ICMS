@@ -38,6 +38,7 @@ COLUNAS_LISTA_REGIMES = ['ANO', 'DATA', 'Nº DO REGIME ESPECIAL', 'EMPRESA',
 def _select(colunas) -> str:
     return '*' if not colunas else ', '.join(f'"{c}"' for c in colunas)
 
+
 SCHEMA_VERSAO = 2
 
 _DDL_HISTORICO = """

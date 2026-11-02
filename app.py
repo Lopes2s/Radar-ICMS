@@ -293,7 +293,7 @@ def _analisar(enviados, forcar, criterio):
     temporarios = []
     try:
         pares = []
-        for arq in enviados:
+        for arq in sorted(enviados, key=lambda a: a.name):
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                 temporarios.append(tmp.name)
                 tmp.write(arq.getbuffer())
@@ -432,11 +432,16 @@ if aba_processar is not None:
           st.session_state.pop("resultado", None)
           st.session_state["analise"] = _analisar(arquivos, _FORCAR[escolha],
                                                   _CRITERIOS[criterio])
+          st.session_state["analise"]["nomes"] = tuple(a.name for a in arquivos)
 
       # Exibidos a partir da sessão, e não de dentro do `if st.button`: assim a
       # análise/o resultado continuam na tela depois de qualquer reexecução do
       # script (por exemplo, o clique em "Baixar").
       analise = st.session_state.get("analise")
+      if analise and "nomes" in analise and (
+              tuple(a.name for a in arquivos) != analise["nomes"]):
+          st.session_state.pop("analise", None)
+          analise = None
       resultado = st.session_state.get("resultado")
       if analise:
           _mostra_analise(analise)
@@ -483,6 +488,7 @@ if aba_processar is not None:
               )
       else:
           st.info("Envie um ou mais PDFs e clique em **Analisar**.")
+
 
 def _renderiza_consultar(conn):
     # Painel de busca no estilo da tela de referência (busca de normas):

@@ -72,6 +72,7 @@ def main(argv=None) -> int:
             resultado = execucao.gravar(conn)
     except armazenamento.SchemaMaisNovo as erro:
         print(f"\n{erro}", file=sys.stderr)
+        _imprime_erros(erros)
         return 1
 
     if xlsx:
@@ -82,6 +83,7 @@ def main(argv=None) -> int:
             print(f"\nNão foi possível gravar {xlsx}.\n"
                   "Se a planilha estiver aberta no Excel, feche-a e rode de novo.",
                   file=sys.stderr)
+            _imprime_erros(erros)
             return 1
 
     print(f"\n✓ Consultas: {resultado['consultas']['novos']} novas, "
@@ -97,17 +99,24 @@ def _finaliza(erros: list) -> int:
     """0 se todos os PDFs foram lidos; senão lista cada erro em stderr e devolve 2."""
     if not erros:
         return 0
+    _imprime_erros(erros)
+    return 2
+
+
+def _imprime_erros(erros: list) -> None:
+    """Lista cada arquivo com erro em stderr (nada se não houver)."""
+    if not erros:
+        return
     print("\nArquivos com erro (os demais foram processados):", file=sys.stderr)
     for linha in erros:
         print(f"  - {linha['Arquivo']}: {linha['Erro']}", file=sys.stderr)
-    return 2
 
 
 def _opcao(argv: list, nome: str) -> str | None:
     if nome not in argv:
         return None
     i = argv.index(nome)
-    if i + 1 >= len(argv):
+    if i + 1 >= len(argv) or argv[i + 1].startswith("--"):
         raise ValueError(f"{nome} exige um valor")
     return argv[i + 1]
 
