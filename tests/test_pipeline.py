@@ -188,3 +188,59 @@ def test_falha_ao_processar_e_registrada_no_log_com_traceback(tmp_path, caplog):
         pipeline.processar_arquivo(pipeline.Lote(), str(ruim), "corrompido.pdf")
     assert any("corrompido.pdf" in r.getMessage() and r.exc_info
                for r in caplog.records)
+
+
+def _c(x, **extra):
+    return {'Ano': '2026', 'Nº da Consulta': '001', 'x': x, **extra}
+
+
+def test_dedup_completo_fica_com_o_registro_mais_preenchido():
+    linhas = [_c('a', Resposta=''), _c('b', Resposta='texto')]
+    out = pipeline.dedup(linhas, pipeline.CHAVE_CONSULTAS, criterio='completo')
+    assert [r['x'] for r in out] == ['b']
+
+
+def test_dedup_completo_empata_na_primeira():
+    out = pipeline.dedup([_c('a'), _c('b')], pipeline.CHAVE_CONSULTAS,
+                         criterio='completo')
+    assert [r['x'] for r in out] == ['a']
+
+
+def test_dedup_recente_usa_a_data_e_empata_no_ultimo_processado():
+    mais_nova_primeiro = [_c('a', **{'Data da Publicação': '2026-02-01'}),
+                          _c('b', **{'Data da Publicação': '2026-01-01'})]
+    out = pipeline.dedup(mais_nova_primeiro, pipeline.CHAVE_CONSULTAS,
+                         criterio='recente')
+    assert [r['x'] for r in out] == ['a']
+
+    sem_data = [_c('a'), _c('b')]
+    out = pipeline.dedup(sem_data, pipeline.CHAVE_CONSULTAS, criterio='recente')
+    assert [r['x'] for r in out] == ['b']
+
+
+def test_dedup_recente_funciona_para_regimes_pela_coluna_data():
+    chave = pipeline.CHAVE_REGIMES
+    base = {'Nº DO REGIME ESPECIAL': '1/2026', 'CNPJ REQUERENTE': '11'}
+    linhas = [{**base, 'x': 'a', 'DATA': '2026-03-01'},
+              {**base, 'x': 'b', 'DATA': '2026-04-01'}]
+    out = pipeline.dedup(linhas, chave, criterio='recente')
+    assert [r['x'] for r in out] == ['b']
+
+
+def test_dedup_mantem_a_ordem_de_chegada_das_chaves():
+    linhas = [_c('a'), {'Ano': '2026', 'Nº da Consulta': '002', 'x': 'c'},
+              _c('b', Resposta='mais completo')]
+    out = pipeline.dedup(linhas, pipeline.CHAVE_CONSULTAS, criterio='completo')
+    assert [r['Nº da Consulta'] for r in out] == ['001', '002']
+    assert out[0]['x'] == 'b'
+
+
+def test_dedup_criterio_invalido_e_erro_de_programacao():
+    with pytest.raises(ValueError):
+        pipeline.dedup([], pipeline.CHAVE_CONSULTAS, criterio='aleatorio')
+
+
+def test_finalizar_aceita_o_criterio():
+    lote = pipeline.Lote(consultas=[_c('a', Resposta=''), _c('b', Resposta='t')])
+    pipeline.finalizar(lote, criterio='completo')
+    assert [r['x'] for r in lote.consultas] == ['b']
