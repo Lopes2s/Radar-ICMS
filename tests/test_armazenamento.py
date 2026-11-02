@@ -284,3 +284,59 @@ def test_banco_de_versao_mais_nova_e_recusado_sem_ser_alterado(tmp_path):
     criou = conn.execute(
         "SELECT name FROM sqlite_master WHERE name = 'consultas'").fetchone()
     assert criou is None
+
+
+def _consulta(**campos):
+    base = {'Ano': '2026', 'Nº da Consulta': '001', 'Data da Publicação': '2026-01-19',
+            'Protocolo': '', 'Súmula': '', 'Problema da Consulta': '',
+            'CNAE Detectado': '', 'Resposta': ''}
+    return {**base, **campos}
+
+
+def test_busca_ignora_acentos_e_caixa(tmp_path):
+    conn = _conn(tmp_path)
+    armazenamento.salvar_consultas(conn, [_consulta(**{'Súmula': 'Substituição Tributária'})])
+    assert len(armazenamento.buscar_consultas(conn, texto='SUBSTITUICAO')) == 1
+    assert len(armazenamento.buscar_consultas(conn, texto='substituição tributária')) == 1
+
+
+def test_busca_alcanca_a_resposta_mesmo_atravessando_paragrafos(tmp_path):
+    conn = _conn(tmp_path)
+    armazenamento.salvar_consultas(conn, [
+        _consulta(Resposta='primeiro trecho\n\nsegundo trecho do fisco')])
+    # a frase atravessa a quebra de parágrafo ("\n\n" vira um espaço na comparação)
+    assert len(armazenamento.buscar_consultas(conn, texto='trecho segundo')) == 1
+    assert len(armazenamento.buscar_consultas(conn, texto='segundo   trecho')) == 1
+    assert len(armazenamento.buscar_consultas(conn, texto='segundo primeiro')) == 0
+
+
+def test_percentual_e_sublinhado_valem_como_texto_literal(tmp_path):
+    conn = _conn(tmp_path)
+    armazenamento.salvar_consultas(conn, [
+        _consulta(**{'Nº da Consulta': '001', 'Súmula': 'desconto de 10% no preço'}),
+        _consulta(**{'Nº da Consulta': '002', 'Súmula': 'prazo de 10 dias'}),
+        _consulta(**{'Nº da Consulta': '003', 'Súmula': 'campo_um'}),
+        _consulta(**{'Nº da Consulta': '004', 'Súmula': 'campoXum'}),
+    ])
+    achadas = armazenamento.buscar_consultas(conn, texto='10%')
+    assert [r['Nº da Consulta'] for r in achadas] == ['001']
+    achadas = armazenamento.buscar_consultas(conn, texto='campo_um')
+    assert [r['Nº da Consulta'] for r in achadas] == ['003']
+
+
+def test_texto_so_com_espacos_equivale_a_sem_filtro(tmp_path):
+    conn = _conn(tmp_path)
+    armazenamento.salvar_consultas(conn, [_consulta(), _consulta(**{'Nº da Consulta': '002'})])
+    assert len(armazenamento.buscar_consultas(conn, texto='   ')) == 2
+
+
+def test_busca_de_regime_por_cnpj_e_por_numero(tmp_path):
+    conn = _conn(tmp_path)
+    armazenamento.salvar_regimes(conn, [
+        {'ANO': '2026', 'Nº DO REGIME ESPECIAL': '10.001/2026',
+         'CNPJ REQUERENTE': '11.222.333/0001-81', 'EMPRESA': 'Alfa'},
+        {'ANO': '2026', 'Nº DO REGIME ESPECIAL': '10.002/2026',
+         'CNPJ REQUERENTE': '44.555.666/0001-00', 'EMPRESA': 'Beta'},
+    ])
+    assert [r['EMPRESA'] for r in armazenamento.buscar_regimes(conn, texto='0001-81')] == ['Alfa']
+    assert [r['EMPRESA'] for r in armazenamento.buscar_regimes(conn, texto='10.002')] == ['Beta']

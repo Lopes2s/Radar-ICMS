@@ -11,6 +11,7 @@ import sqlite3
 from contextlib import contextmanager
 
 from core.pipeline import CHAVE_CONSULTAS, CHAVE_REGIMES, Lote
+from core.texto import normalizar
 
 _RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _CAMINHO_PADRAO = os.path.join(_RAIZ, 'mapeamento.db')
@@ -55,6 +56,7 @@ def conectar(caminho_bd: str | None = None) -> sqlite3.Connection:
     """Abre (ou cria) o banco (ver `caminho_do_banco` para a escolha do arquivo)."""
     conn = sqlite3.connect(caminho_do_banco(caminho_bd))
     conn.row_factory = sqlite3.Row
+    conn.create_function('norm', 1, normalizar, deterministic=True)
     return conn
 
 
@@ -162,13 +164,32 @@ def salvar_regimes(conn: sqlite3.Connection, registros: list) -> dict:
     return _upsert(conn, 'regimes', COLUNAS_REGIMES, CHAVE_REGIMES, registros)
 
 
+_CAMPOS_BUSCA_CONSULTAS = ['Nº da Consulta', 'Súmula', 'Problema da Consulta',
+                           'CNAE Detectado', 'Resposta']
+_CAMPOS_BUSCA_REGIMES = ['Nº DO REGIME ESPECIAL', 'EMPRESA', 'CNPJ REQUERENTE',
+                         'EMENTA', 'BENEFÍCIOS/PROCEDIMENTOS']
+_ESCAPE = " ESCAPE '\\'"  # em SQL: ESCAPE '\'
+
+
+def _filtro_texto(campos: list, texto: str | None):
+    """(condição SQL, parâmetros) da busca textual, ou None se não há o que
+    filtrar. Compara `norm(campo)` com o texto normalizado; `%` e `_` digitados
+    pelo usuário valem como caracteres comuns."""
+    alvo = normalizar(texto)
+    if not alvo:
+        return None
+    literal = alvo.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+    condicao = ' OR '.join(f'norm("{c}") LIKE ?{_ESCAPE}' for c in campos)
+    return f'({condicao})', [f'%{literal}%'] * len(campos)
+
+
 def buscar_consultas(conn: sqlite3.Connection, texto: str | None = None,
                      ano: str | None = None) -> list:
     condicoes, parametros = [], []
-    if texto:
-        condicoes.append('("Súmula" LIKE ? OR "Problema da Consulta" LIKE ? '
-                         'OR "CNAE Detectado" LIKE ?)')
-        parametros += [f'%{texto}%'] * 3
+    filtro = _filtro_texto(_CAMPOS_BUSCA_CONSULTAS, texto)
+    if filtro:
+        condicoes.append(filtro[0])
+        parametros += filtro[1]
     if ano:
         condicoes.append('"Ano" = ?')
         parametros.append(ano)
@@ -180,9 +201,10 @@ def buscar_consultas(conn: sqlite3.Connection, texto: str | None = None,
 def buscar_regimes(conn: sqlite3.Connection, texto: str | None = None,
                    ano: str | None = None) -> list:
     condicoes, parametros = [], []
-    if texto:
-        condicoes.append('("EMPRESA" LIKE ? OR "EMENTA" LIKE ?)')
-        parametros += [f'%{texto}%'] * 2
+    filtro = _filtro_texto(_CAMPOS_BUSCA_REGIMES, texto)
+    if filtro:
+        condicoes.append(filtro[0])
+        parametros += filtro[1]
     if ano:
         condicoes.append('"ANO" = ?')
         parametros.append(ano)
