@@ -441,7 +441,7 @@ def _renderiza_consultar(conn):
             ano = st.selectbox("Ano do ato", ["Todos"] + anos)
 
     ano_filtro = None if ano == "Todos" else ano
-    resultados = consulta.buscar(conn, tipo, texto=texto or None, ano=ano_filtro)
+    resultados = consulta.buscar_lista(conn, tipo, texto=texto or None, ano=ano_filtro)
 
     with st.container(border=True, key="card-consultar"):
         st.markdown('<div class="icms-resultado-barra">RESULTADO DA PESQUISA</div>',
@@ -458,7 +458,9 @@ def _renderiza_consultar(conn):
         linhas_selecionadas = st.session_state["tabela-resultados"]["selection"]["rows"]
         if linhas_selecionadas:
             cols_do_tipo = planilha.COLS_CONSULTAS if tipo == "consulta" else planilha.COLS_REGIMES
-            _mostra_detalhe(tipo, resultados[linhas_selecionadas[0]], cols_do_tipo)
+            completo = consulta.detalhe(conn, tipo, resultados[linhas_selecionadas[0]])
+            if completo is not None:
+                _mostra_detalhe(tipo, completo, cols_do_tipo)
 
         if resultados:
             st.download_button(

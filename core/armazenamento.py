@@ -26,6 +26,14 @@ COLUNAS_REGIMES = [
     'DESCRIÇÃO CNAE', 'VIGÊNCIA DO RE', 'EMENTA',
     'ABRANGÊNCIA', 'BENEFÍCIOS/PROCEDIMENTOS', 'DISPOSIÇÕES GERAIS',
 ]
+COLUNAS_LISTA_CONSULTAS = ['Ano', 'Nº da Consulta', 'Data da Publicação',
+                           'Súmula', 'CNAE Detectado']
+COLUNAS_LISTA_REGIMES = ['ANO', 'DATA', 'Nº DO REGIME ESPECIAL', 'EMPRESA',
+                         'CNPJ REQUERENTE', 'VIGÊNCIA DO RE', 'EMENTA']
+
+
+def _select(colunas) -> str:
+    return '*' if not colunas else ', '.join(f'"{c}"' for c in colunas)
 
 SCHEMA_VERSAO = 1
 
@@ -184,7 +192,7 @@ def _filtro_texto(campos: list, texto: str | None):
 
 
 def buscar_consultas(conn: sqlite3.Connection, texto: str | None = None,
-                     ano: str | None = None) -> list:
+                     ano: str | None = None, colunas: list | None = None) -> list:
     condicoes, parametros = [], []
     filtro = _filtro_texto(_CAMPOS_BUSCA_CONSULTAS, texto)
     if filtro:
@@ -194,12 +202,13 @@ def buscar_consultas(conn: sqlite3.Connection, texto: str | None = None,
         condicoes.append('"Ano" = ?')
         parametros.append(ano)
     where = f'WHERE {" AND ".join(condicoes)}' if condicoes else ''
-    linhas = conn.execute(f'SELECT * FROM consultas {where}', parametros).fetchall()
+    linhas = conn.execute(
+        f'SELECT {_select(colunas)} FROM consultas {where}', parametros).fetchall()
     return [dict(linha) for linha in linhas]
 
 
 def buscar_regimes(conn: sqlite3.Connection, texto: str | None = None,
-                   ano: str | None = None) -> list:
+                   ano: str | None = None, colunas: list | None = None) -> list:
     condicoes, parametros = [], []
     filtro = _filtro_texto(_CAMPOS_BUSCA_REGIMES, texto)
     if filtro:
@@ -209,8 +218,21 @@ def buscar_regimes(conn: sqlite3.Connection, texto: str | None = None,
         condicoes.append('"ANO" = ?')
         parametros.append(ano)
     where = f'WHERE {" AND ".join(condicoes)}' if condicoes else ''
-    linhas = conn.execute(f'SELECT * FROM regimes {where}', parametros).fetchall()
+    linhas = conn.execute(
+        f'SELECT {_select(colunas)} FROM regimes {where}', parametros).fetchall()
     return [dict(linha) for linha in linhas]
+
+
+def buscar_detalhe(conn: sqlite3.Connection, tabela: str, chave: list,
+                   valores: dict) -> dict | None:
+    """O registro completo pela chave natural, ou None. `tabela` é sempre
+    'consultas' ou 'regimes' (vem do código, nunca do usuário)."""
+    if tabela not in ('consultas', 'regimes'):
+        raise ValueError(f"tabela inválida: {tabela!r}")
+    where = ' AND '.join(f'"{c}" = ?' for c in chave)
+    linha = conn.execute(f'SELECT * FROM {tabela} WHERE {where}',
+                         tuple(valores.get(c, '') for c in chave)).fetchone()
+    return dict(linha) if linha else None
 
 
 def persistir_lote(conn: sqlite3.Connection, lote: Lote) -> dict:

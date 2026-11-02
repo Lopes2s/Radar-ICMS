@@ -340,3 +340,28 @@ def test_busca_de_regime_por_cnpj_e_por_numero(tmp_path):
     ])
     assert [r['EMPRESA'] for r in armazenamento.buscar_regimes(conn, texto='0001-81')] == ['Alfa']
     assert [r['EMPRESA'] for r in armazenamento.buscar_regimes(conn, texto='10.002')] == ['Beta']
+
+
+def test_buscar_com_colunas_devolve_so_as_pedidas(tmp_path):
+    conn = _conn(tmp_path)
+    armazenamento.salvar_consultas(conn, [_consulta(Resposta='texto longo')])
+    linhas = armazenamento.buscar_consultas(conn, colunas=['Ano', 'Nº da Consulta'])
+    assert list(linhas[0]) == ['Ano', 'Nº da Consulta']
+
+
+def test_buscar_detalhe_pela_chave_natural(tmp_path):
+    conn = _conn(tmp_path)
+    armazenamento.salvar_consultas(conn, [_consulta(Resposta='texto longo')])
+    achado = armazenamento.buscar_detalhe(
+        conn, 'consultas', pipeline.CHAVE_CONSULTAS,
+        {'Ano': '2026', 'Nº da Consulta': '001'})
+    assert achado['Resposta'] == 'texto longo'
+    ausente = armazenamento.buscar_detalhe(
+        conn, 'consultas', pipeline.CHAVE_CONSULTAS,
+        {'Ano': '1999', 'Nº da Consulta': '9'})
+    assert ausente is None
+
+
+def test_colunas_da_lista_incluem_a_chave_natural():
+    assert set(pipeline.CHAVE_CONSULTAS) <= set(armazenamento.COLUNAS_LISTA_CONSULTAS)
+    assert set(pipeline.CHAVE_REGIMES) <= set(armazenamento.COLUNAS_LISTA_REGIMES)

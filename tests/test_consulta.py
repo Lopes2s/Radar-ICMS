@@ -101,3 +101,27 @@ def test_exportar_busca_abre_conexao_propria_e_devolve_xlsx(tmp_path):
 
     ws = load_workbook(io.BytesIO(dados))['Consultas — a revisar']
     assert ws.max_row == 2  # cabeçalho + 1 resultado
+
+
+def test_buscar_lista_traz_so_colunas_leves_e_detalhe_traz_tudo(tmp_path):
+    with armazenamento.sessao(str(tmp_path / "l.db")) as c:
+        armazenamento.salvar_consultas(c, [
+            {'Ano': '2026', 'Nº da Consulta': '001', 'Súmula': 'ICMS',
+             'Resposta': 'resposta completa'}])
+        lista = consulta.buscar_lista(c, 'consulta')
+        assert 'Resposta' not in lista[0]
+        assert lista[0]['Súmula'] == 'ICMS'
+        completo = consulta.detalhe(c, 'consulta', lista[0])
+        assert completo['Resposta'] == 'resposta completa'
+
+
+def test_detalhe_de_registro_inexistente_devolve_none(tmp_path):
+    with armazenamento.sessao(str(tmp_path / "l.db")) as c:
+        assert consulta.detalhe(c, 'regime', {'Nº DO REGIME ESPECIAL': 'x',
+                                              'CNPJ REQUERENTE': 'y'}) is None
+
+
+def test_buscar_lista_tipo_invalido_levanta_erro(tmp_path):
+    with armazenamento.sessao(str(tmp_path / "l.db")) as c:
+        with pytest.raises(ValueError):
+            consulta.buscar_lista(c, 'outro')
