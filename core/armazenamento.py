@@ -8,6 +8,7 @@ biblioteca padrão.
 """
 import os
 import sqlite3
+from contextlib import contextmanager
 
 from core.pipeline import CHAVE_CONSULTAS, CHAVE_REGIMES, Lote
 
@@ -45,6 +46,24 @@ def conectar(caminho_bd: str | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(caminho_do_banco(caminho_bd))
     conn.row_factory = sqlite3.Row
     return conn
+
+
+@contextmanager
+def aberta(caminho_bd: str | None = None):
+    """Conexão que é FECHADA ao sair do bloco, com ou sem erro."""
+    conn = conectar(caminho_bd)
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+@contextmanager
+def sessao(caminho_bd: str | None = None):
+    """Como `aberta`, com o esquema já criado/atualizado (idempotente)."""
+    with aberta(caminho_bd) as conn:
+        criar_esquema(conn)
+        yield conn
 
 
 def _upsert(conn: sqlite3.Connection, tabela: str, colunas: list,

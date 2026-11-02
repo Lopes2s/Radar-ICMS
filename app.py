@@ -185,10 +185,10 @@ with st.sidebar:
     st.divider()
 
 
-def _conexao():
-    conn = armazenamento.conectar(_CAMINHO_BANCO)
-    armazenamento.criar_esquema(conn)
-    return conn
+def _persistir(lote):
+    """Grava o lote no banco e devolve o resumo de novos/atualizados."""
+    with armazenamento.sessao(_CAMINHO_BANCO) as conn:
+        return armazenamento.persistir_lote(conn, lote)
 
 
 def _titulo_do_registro(tipo: str, registro: dict) -> str:
@@ -287,7 +287,7 @@ def _processar(enviados, forcar):
     barra.empty()
     pipeline.finalizar(lote)
 
-    mapeamento = armazenamento.persistir_lote(_conexao(), lote)
+    mapeamento = _persistir(lote)
 
     # planilha em memória, exportação opcional: nada de cópia em disco
     buf = io.BytesIO()
@@ -416,9 +416,7 @@ if aba_processar is not None:
       else:
           st.info("Envie um ou mais PDFs e clique em **Processar**.")
 
-with aba_consultar:
-    conn = _conexao()
-
+def _renderiza_consultar(conn):
     # Painel de busca no estilo da tela de referência (busca de normas):
     # os mesmos 3 filtros de sempre (tipo/texto/ano), só reorganizados lado
     # a lado num card com rótulos em destaque — nenhum campo novo, nenhuma
@@ -461,3 +459,8 @@ with aba_consultar:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 on_click="ignore",
             )
+
+
+with aba_consultar:
+    with armazenamento.sessao(_CAMINHO_BANCO) as conn:
+        _renderiza_consultar(conn)

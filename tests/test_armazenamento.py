@@ -227,3 +227,25 @@ def test_conectar_sem_caminho_cai_na_pasta_de_dados(tmp_path, monkeypatch):
     conn.commit()
     conn.close()
     assert (tmp_path / "mapeamento.db").exists()
+
+
+import sqlite3
+
+import pytest
+
+
+def test_aberta_fecha_a_conexao_ao_sair(tmp_path):
+    with armazenamento.aberta(str(tmp_path / "a.db")) as conn:
+        conn.execute("SELECT 1")
+    with pytest.raises(sqlite3.ProgrammingError):
+        conn.execute("SELECT 1")
+
+
+def test_sessao_cria_o_esquema_e_fecha_mesmo_com_erro(tmp_path):
+    caminho = str(tmp_path / "s.db")
+    with pytest.raises(RuntimeError):
+        with armazenamento.sessao(caminho) as conn:
+            assert armazenamento.buscar_consultas(conn) == []
+            raise RuntimeError("falha")
+    with pytest.raises(sqlite3.ProgrammingError):
+        conn.execute("SELECT 1")
