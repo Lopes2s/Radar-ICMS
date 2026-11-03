@@ -8,6 +8,14 @@ as variáveis de cor do tema ativo, o CSS dos componentes (cartões, indicadores
 botões, campos, abas, alertas) e pequenos blocos de HTML (marca, cabeçalho de
 página, estado vazio, perfil).
 
+Tema claro/escuro: o tema real é o que o NAVEGADOR está usando (sistema ou menu
+⋮ → Settings), e ele pode mudar ao vivo, sem o servidor rodar o script de novo.
+Por isso um pequeno script (st.html com JavaScript, texto fixo) lê a cor de
+fundo NATIVA do Streamlit e marca `data-ds-tema` no <html>; o CSS segue essa
+marca. O tema que o servidor informa (`st.context.theme`) só serve de valor
+inicial, para a primeira pintura não piscar. Por isso o CSS daqui nunca pode
+redefinir o fundo de `.stApp` — o script lê justamente esse fundo.
+
 Regras do showcase seguidas aqui:
 - toda cor vem de variável (nada de cor fixa no CSS novo);
 - azul é a ação principal; verde é concluído, âmbar é espera/aviso e vermelho é
@@ -89,11 +97,21 @@ def tema_ativo() -> str:
     return "dark" if tipo == "dark" else "light"
 
 
-def variaveis_css(tema: str) -> str:
-    """Bloco :root com os tokens do tema."""
+def _declaracoes(tema: str) -> str:
     i = 1 if tema == "dark" else 0
-    linhas = "".join(f"--{nome}: {valores[i]};" for nome, valores in TOKENS.items())
-    return f":root {{{linhas}}}"
+    return "".join(f"--{nome}: {valores[i]};" for nome, valores in TOKENS.items())
+
+
+def variaveis_css(tema: str) -> str:
+    """Bloco :root com os tokens do tema (valor inicial, vindo do servidor)."""
+    return f":root {{{_declaracoes(tema)}}}"
+
+
+def variaveis_por_atributo() -> str:
+    """Variáveis dos dois temas amarradas ao atributo que o script marca no
+    <html>; ganham do :root padrão (maior especificidade)."""
+    return "".join(
+        f':root[data-ds-tema="{tema}"] {{{_declaracoes(tema)}}}' for tema in ("light", "dark"))
 
 
 def icone_uri(nome: str, cor: str = "#FFFFFF", traco: float = 2) -> str:
@@ -131,8 +149,11 @@ def _css_kpis() -> str:
 
 _CSS_COMPONENTES = """
 /* ---------- base ---------- */
-.stApp { background: var(--bg); color: var(--text); }
+/* Fundo, texto e lateral vêm do tema nativo (config.toml). NÃO redefina o fundo
+   de .stApp: o script de tema lê essa cor para saber se o tema é claro ou escuro. */
 [data-testid="stHeader"] { background: transparent; }
+/* bloco do script de tema: já executou ao montar; só ocuparia espaço (gap) */
+.stElementContainer:has(> [data-testid="stHtml"]) { display: none; }
 .block-container { max-width: 1280px; padding: 2rem 2rem 4rem; }
 hr { border-color: var(--border-light) !important; }
 a { color: var(--primary-ink); }
@@ -140,9 +161,9 @@ a { color: var(--primary-ink); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 
 /* ---------- barra lateral ---------- */
-[data-testid="stSidebar"] { background: var(--surface); border-right: 1px solid var(--border); }
+.ds-logo-d { display: none; }
 .ds-side-head { padding: 2px 2px 14px; border-bottom: 1px solid var(--border-light); margin-bottom: 14px; }
-.ds-side-head img { height: 22px; width: auto; display: block; margin-bottom: 12px; }
+.ds-side-head img { height: 22px; width: auto; margin-bottom: 12px; }
 .ds-side-label { font-size: 11px !important; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--text-3); margin: 0 !important; }
 .ds-who { display: flex; align-items: center; gap: 10px; padding: 14px 2px 10px; border-top: 1px solid var(--border-light); margin-top: 18px; }
 .ds-avatar { width: 34px; height: 34px; border-radius: 12px; background: var(--primary); color: #fff; font-weight: 700; font-size: 12px; display: grid; place-items: center; flex: none; }
@@ -223,25 +244,60 @@ div[role="dialog"] h3 { font-size: 1.2rem !important; line-height: 1.3 !importan
 """
 
 
+def _css_logo(tema: str) -> str:
+    """Logo do tema inicial; depois o atributo do <html> assume (claro: logo
+    escuro; escuro: logo branco)."""
+    inicial = (".ds-logo-l { display: none; } .ds-logo-d { display: block; }"
+               if tema == "dark" else "")
+    return (inicial
+            + ':root[data-ds-tema="light"] .ds-logo-l { display: block; }'
+            + ':root[data-ds-tema="light"] .ds-logo-d { display: none; }'
+            + ':root[data-ds-tema="dark"] .ds-logo-l { display: none; }'
+            + ':root[data-ds-tema="dark"] .ds-logo-d { display: block; }')
+
+
 def css(tema: str | None = None) -> str:
     tema = tema or tema_ativo()
-    return f"<style>{variaveis_css(tema)}{_CSS_COMPONENTES}{_css_kpis()}</style>"
+    return ("<style>" + variaveis_css(tema) + variaveis_por_atributo()
+            + _CSS_COMPONENTES + _css_logo(tema) + _css_kpis() + "</style>")
+
+
+# Texto fixo (nada vindo de dados). Lê a cor de fundo nativa do app e marca o
+# tema real no <html>; confere a cada 250 ms para acompanhar a troca ao vivo.
+_JS_TEMA = r"""<script>
+(function () {
+  if (window.__dsTema) return;
+  function aplicar() {
+    var app = document.querySelector('.stApp');
+    if (!app) return;
+    var c = getComputedStyle(app).backgroundColor.match(/[\d.]+/g);
+    if (!c) return;
+    var claro = (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]) / 255 >= 0.5;
+    document.documentElement.setAttribute('data-ds-tema', claro ? 'light' : 'dark');
+  }
+  window.__dsTema = setInterval(aplicar, 250);
+  aplicar();
+})();
+</script>"""
 
 
 def injetar_tema() -> str:
-    """Injeta variáveis e CSS na página e devolve o tema ativo."""
+    """Injeta variáveis, CSS e o script de tema; devolve o tema inicial."""
     tema = tema_ativo()
     st.markdown(css(tema), unsafe_allow_html=True)
+    st.html(_JS_TEMA, unsafe_allow_javascript=True)
     return tema
 
 
 # ---------- blocos de HTML (uma linha só: linha em branco encerra o bloco no Markdown) ----------
 
-def html_marca(rotulo: str, tema: str) -> str:
-    """Logo Martinelli (escuro no tema claro, branco no escuro) e o nome do app."""
+def html_marca(rotulo: str) -> str:
+    """Logo Martinelli e o nome do app. Vão os dois logos; o CSS mostra o escuro
+    no tema claro e o branco no escuro (a troca de tema pode ser ao vivo)."""
     return (
         '<div class="ds-side-head">'
-        f'<img src="{_logo_uri(tema)}" alt="Martinelli Advogados">'
+        f'<img class="ds-logo-l" src="{_logo_uri("light")}" alt="Martinelli Advogados">'
+        f'<img class="ds-logo-d" src="{_logo_uri("dark")}" alt="Martinelli Advogados">'
         f'<p class="ds-side-label">{html.escape(rotulo)}</p></div>'
     )
 
@@ -264,7 +320,7 @@ def html_titulo_cartao(titulo: str, sub: str = "") -> str:
 
 
 def html_vazio(icone: str, titulo: str, texto: str) -> str:
-    cinza = icone_uri(icone, "#8F95A0" if tema_ativo() == "dark" else "#B0B5BD")
+    cinza = icone_uri(icone, "#8F95A0")  # cinza médio: lê bem nos dois temas
     return (
         '<div class="ds-empty">'
         f'<div class="ei"><img src="{cinza}" alt=""></div>'
@@ -295,8 +351,8 @@ def html_perfil(nome: str, papel: str) -> str:
 
 # ---------- atalhos que já escrevem na página ----------
 
-def marca_lateral(rotulo: str, tema: str) -> None:
-    st.markdown(html_marca(rotulo, tema), unsafe_allow_html=True)
+def marca_lateral(rotulo: str) -> None:
+    st.markdown(html_marca(rotulo), unsafe_allow_html=True)
 
 
 def cabecalho_pagina(rotulo: str, titulo: str, subtitulo: str = "") -> None:

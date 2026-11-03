@@ -57,11 +57,40 @@ def test_config_toml_esta_em_sincronia_com_os_tokens():
                 f"{nome_do_tema}.{chave_toml} difere do token {token}"
 
 
-def test_marca_usa_o_logo_certo_para_cada_tema():
-    claro, escuro = design.html_marca("Mapeador", "light"), design.html_marca("Mapeador", "dark")
-    assert "data:image/png;base64," in claro and "data:image/png;base64," in escuro
-    assert claro != escuro  # logo escuro no tema claro, branco no escuro
-    assert "Martinelli Advogados" in claro and "Mapeador" in claro
+def test_marca_leva_os_dois_logos_e_o_css_escolhe_pelo_tema():
+    # a troca de tema pode acontecer ao vivo, então os dois logos vão no HTML
+    saida = design.html_marca("Mapeador")
+    assert saida.count("data:image/png;base64,") == 2
+    assert 'class="ds-logo-l"' in saida and 'class="ds-logo-d"' in saida
+    assert "Martinelli Advogados" in saida and "Mapeador" in saida
+    claro, escuro = design.css("light"), design.css("dark")
+    assert ':root[data-ds-tema="dark"] .ds-logo-d { display: block; }' in claro
+    assert ".ds-logo-l { display: none; } .ds-logo-d { display: block; }" in escuro  # valor inicial no escuro
+    assert ".ds-logo-l { display: none; } .ds-logo-d { display: block; }" not in claro
+
+
+def test_css_amarra_os_dois_temas_ao_atributo_do_html():
+    css = design.css("light")
+    assert ':root[data-ds-tema="dark"] {' in css and ':root[data-ds-tema="light"] {' in css
+    # o atributo vem depois do :root padrão e tem mais especificidade: ganha
+    assert css.index(":root {") < css.index(':root[data-ds-tema="dark"]')
+    assert "--bg: #161617;" in css.split(':root[data-ds-tema="dark"]')[1]
+
+
+def test_css_nao_redefine_o_fundo_do_app():
+    # o script de tema decide claro/escuro lendo a cor de fundo NATIVA de .stApp;
+    # se o CSS a sobrescrevesse com var(--bg), o tema ficaria preso no valor inicial
+    css = design.css("light")
+    assert ".stApp {" not in css and ".stApp{" not in css
+    assert 'data-testid="stSidebar"] {' not in css
+
+
+def test_script_de_tema_le_o_fundo_nativo_e_marca_o_html():
+    js = design._JS_TEMA
+    assert "data-ds-tema" in js and "getComputedStyle(app).backgroundColor" in js
+    assert "window.__dsTema" in js            # instala uma vez só
+    assert "<script>" in js and "</script>" in js
+    assert "${" not in js                      # texto fixo: nada interpolado
 
 
 def test_cabecalho_escapa_o_texto_vindo_de_fora():

@@ -38,10 +38,10 @@ _CAMINHO_BANCO = os.environ.get("MAPEADOR_BANCO") or None
 # Visual: Design System Martinelli (interface/design.py + .streamlit/config.toml).
 st.set_page_config(page_title="Mapeador Tributário PR", page_icon="⚖️",
                    layout="wide")
-_tema = design.injetar_tema()
+design.injetar_tema()
 
 with st.sidebar:
-    design.marca_lateral("Mapeador Tributário PR", _tema)
+    design.marca_lateral("Mapeador Tributário PR")
 
 
 def _persistir(lote):
