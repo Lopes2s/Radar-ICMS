@@ -161,3 +161,16 @@ def test_resumo_do_banco_conta_atos_une_anos_e_traz_a_ultima_importacao(tmp_path
     assert resumo['regimes'] == 3
     assert resumo['anos'] == ['2024', '2025', '2026']   # união, sem repetir e sem vazio
     assert resumo['ultima_importacao'][:4].isdigit()      # ISO UTC gravado pelo armazenamento
+
+
+def test_ajustes_do_ato_por_tipo(tmp_path):
+    ato = {'ANO': '2026', 'Nº DO REGIME ESPECIAL': '9.053/2026',
+           'CNPJ REQUERENTE': '11.222.333/0001-81', 'EMENTA': 'x'}
+    with armazenamento.sessao(str(tmp_path / "a.db")) as c:
+        armazenamento.salvar_regimes(c, [ato])
+        armazenamento.juntar_ajustes(c, 'regimes', consulta.CHAVES['regime'],
+                                     ('9.053/2026', '11.222.333/0001-81'), ['EMENTA'])
+        assert consulta.ajustes(c, 'regime', ato) == ['EMENTA']
+        assert consulta.ajustes(c, 'regime', {**ato, 'CNPJ REQUERENTE': '00'}) == []
+        with pytest.raises(ValueError):
+            consulta.ajustes(c, 'outro', ato)

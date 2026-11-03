@@ -91,3 +91,12 @@ def resumo_do_banco(conn) -> dict:
     ultima = conn.execute('SELECT MAX(importado_em) FROM importacoes').fetchone()[0]
     return {'consultas': n_consultas, 'regimes': n_regimes, 'anos': anos,
             'ultima_importacao': ultima}
+
+
+def ajustes(conn, tipo: str, registro: dict) -> list:
+    """Campos deste ato que o administrador ajustou à mão (lista vazia se nenhum)."""
+    if tipo not in TIPOS:
+        raise ValueError(f"tipo deve ser um de {TIPOS}: {tipo!r}")
+    chave = CHAVES[tipo]
+    return armazenamento.ajustes_de(conn, _TABELAS[tipo], chave,
+                                    tuple(registro.get(c, '') for c in chave))
