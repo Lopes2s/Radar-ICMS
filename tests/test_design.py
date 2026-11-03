@@ -100,6 +100,22 @@ def test_cabecalho_escapa_o_texto_vindo_de_fora():
     assert "\n" not in saida  # uma linha só: linha em branco encerra o bloco no Markdown
 
 
+def test_cabecalho_de_login_tem_os_dois_logos_e_escapa_o_texto():
+    saida = design.html_login_cabecalho("Acesso", "<Título>", "sub & cia")
+    assert saida.count("data:image/png;base64,") == 2
+    assert 'class="ds-logo-l"' in saida and 'class="ds-logo-d"' in saida
+    assert "&lt;Título&gt;" in saida and "sub &amp; cia" in saida
+    assert "\n" not in saida
+
+
+def test_css_centraliza_o_cartao_de_login():
+    css = design.css("light")
+    assert ".stMainBlockContainer:has(.st-key-card-login)" in css
+    assert ".st-key-card-login { max-width: 440px;" in css
+    # o bloco interno do Streamlit cresce (flex-grow: 1); é ele que precisa centralizar o cartão
+    assert 'stMainBlockContainer:has(.st-key-card-login) > [data-testid="stVerticalBlock"]' in css
+
+
 def test_cabecalho_sem_subtitulo_nao_gera_paragrafo():
     assert "<p>" not in design.html_cabecalho("a", "b")
 

@@ -276,12 +276,21 @@ def _tela_inicial(monkeypatch, senha=None):
     return AppTest.from_file(APP).run(timeout=30)
 
 
-def test_abre_na_tela_inicial_sem_abas_nem_uploader(monkeypatch):
+def _etapa_da_senha(monkeypatch, senha="segredo"):
+    """Tela inicial -> clica em "Administrador" -> segunda etapa (senha)."""
+    at = _tela_inicial(monkeypatch, senha)
+    at.button(key="entrar-admin").click().run(timeout=30)
+    return at
+
+
+def test_abre_na_escolha_do_perfil_sem_abas_nem_uploader_nem_senha(monkeypatch):
     at = _tela_inicial(monkeypatch, "segredo")
     assert not at.exception
     assert len(at.tabs) == 0
     assert len(at.get("file_uploader")) == 0
     assert {b.key for b in at.button} >= {"entrar-consulta", "entrar-admin"}
+    assert len(at.text_input) == 0            # a senha só aparece depois de escolher o admin
+    assert any("Como deseja entrar" in m.value for m in at.markdown)
 
 
 def test_perfil_consulta_ve_so_a_aba_consultar(monkeypatch):
@@ -293,41 +302,83 @@ def test_perfil_consulta_ve_so_a_aba_consultar(monkeypatch):
     assert "Trocar perfil" in [b.label for b in at.button]
 
 
-def test_admin_com_senha_errada_e_recusado(monkeypatch):
-    at = _tela_inicial(monkeypatch, "segredo")
-    at.text_input(key="senha-admin").input("errada")
-    at.button(key="entrar-admin").click().run(timeout=30)
+def test_escolher_administrador_pede_a_senha_sem_entrar(monkeypatch):
+    at = _etapa_da_senha(monkeypatch)
     assert not at.exception
-    assert len(at.error) == 1
+    assert len(at.text_input) == 1 and at.text_input(key="senha-admin").value == ""
+    assert {b.key for b in at.button} >= {"confirmar-admin", "voltar-login"}
+    assert "entrar-consulta" not in {b.key for b in at.button}
     assert len(at.tabs) == 0
     assert at.session_state.filtered_state.get("perfil") is None
 
 
+def test_voltar_da_senha_retorna_a_escolha_do_perfil(monkeypatch):
+    at = _etapa_da_senha(monkeypatch)
+    at.button(key="voltar-login").click().run(timeout=30)
+    assert not at.exception
+    assert len(at.text_input) == 0
+    assert {b.key for b in at.button} >= {"entrar-consulta", "entrar-admin"}
+
+
+def test_admin_com_senha_errada_e_recusado_e_continua_pedindo(monkeypatch):
+    at = _etapa_da_senha(monkeypatch)
+    at.text_input(key="senha-admin").input("errada")
+    at.button(key="confirmar-admin").click().run(timeout=30)
+    assert not at.exception
+    assert len(at.error) == 1
+    assert len(at.tabs) == 0
+    assert at.session_state.filtered_state.get("perfil") is None
+    assert len(at.text_input) == 1             # segue na etapa da senha
+
+
 def test_admin_com_senha_certa_ve_as_duas_abas(monkeypatch):
-    at = _tela_inicial(monkeypatch, "segredo")
+    at = _etapa_da_senha(monkeypatch)
     at.text_input(key="senha-admin").input("segredo")
-    at.button(key="entrar-admin").click().run(timeout=30)
+    at.button(key="confirmar-admin").click().run(timeout=30)
     assert not at.exception
     assert [t.label for t in at.tabs][0].endswith("Processar e mapear")
     assert len(at.tabs) == 2
     assert len(at.get("file_uploader")) == 1
+    assert "login_etapa" not in at.session_state.filtered_state   # etapa limpa ao entrar
 
 
-def test_sem_senha_configurada_o_botao_admin_fica_desabilitado(monkeypatch):
+def test_sem_senha_configurada_o_admin_fica_desabilitado(monkeypatch):
     at = _tela_inicial(monkeypatch)          # nenhum secret definido
     assert at.button(key="entrar-admin").disabled is True
-    assert at.text_input(key="senha-admin").disabled is True
     assert any("não configurada" in w.value for w in at.warning)
+    assert len(at.text_input) == 0
     # e o perfil Consulta continua disponível
     assert at.button(key="entrar-consulta").disabled is False
 
 
-def test_trocar_perfil_volta_para_a_tela_inicial():
+def test_trocar_perfil_volta_para_a_escolha_do_perfil(monkeypatch):
+    at = _etapa_da_senha(monkeypatch)
+    at.text_input(key="senha-admin").input("segredo")
+    at.button(key="confirmar-admin").click().run(timeout=30)
+    at.button(key="trocar-perfil").click().run(timeout=30)
+    assert not at.exception
+    assert len(at.tabs) == 0
+    assert len(at.text_input) == 0             # volta à escolha, não à senha
+    assert "entrar-consulta" in {b.key for b in at.button}
+
+
+def test_trocar_perfil_do_consulta_volta_para_a_escolha_do_perfil():
     at = _app("consulta").run(timeout=30)
     at.button(key="trocar-perfil").click().run(timeout=30)
     assert not at.exception
     assert len(at.tabs) == 0
-    assert "entrar-consulta" in {b.key for b in at.button}
+    assert {b.key for b in at.button} >= {"entrar-consulta", "entrar-admin"}
+
+
+def test_login_nao_mostra_a_lateral_nem_a_marca_da_lateral(monkeypatch):
+    at = _tela_inicial(monkeypatch, "segredo")
+    assert len(at.sidebar.markdown) == 0 and len(at.sidebar.button) == 0
+
+
+def test_depois_do_login_a_lateral_tem_a_marca(monkeypatch):
+    at = _tela_inicial(monkeypatch, "segredo")
+    at.button(key="entrar-consulta").click().run(timeout=30)
+    assert any("Martinelli Advogados" in m.value for m in at.sidebar.markdown)
 
 
 def test_citacao_legal_ganha_recuo_e_o_marcador_invisivel_nunca_aparece():

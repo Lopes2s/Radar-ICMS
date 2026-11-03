@@ -171,6 +171,17 @@ a { color: var(--primary-ink); }
 .ds-who span { font-size: 11px; color: var(--text-3); }
 .ds-sec { font-size: 11px !important; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); margin: 10px 0 8px !important; }
 
+/* ---------- login: cartão centralizado na tela ---------- */
+.stMainBlockContainer:has(.st-key-card-login) { min-height: 100vh; display: flex; flex-direction: column; }
+.stMainBlockContainer:has(.st-key-card-login) > [data-testid="stVerticalBlock"] { flex-grow: 1; justify-content: center; }
+.st-key-card-login { max-width: 440px; width: 100%; margin: 0 auto; padding: 32px 32px 26px !important; border-radius: 16px !important; box-shadow: 0 8px 24px rgba(0, 0, 0, .09); }
+.st-key-card-login [data-testid^="stBaseButton-"] { min-height: 48px; font-size: 15px; }
+.ds-login-head { text-align: center; margin-bottom: 22px; }
+.ds-login-head img { height: 30px; width: auto; margin: 0 auto 18px; }
+.ds-login-head h1 { font-size: 22px !important; font-weight: 800 !important; letter-spacing: -.02em; line-height: 1.2 !important; margin: 4px 0 4px !important; padding: 0 !important; color: var(--text); }
+.ds-login-head p { color: var(--text-2); margin: 0; }
+.ds-opcao-nota { text-align: center; font-size: 12px; color: var(--text-3); margin: -4px 0 14px; }
+
 /* ---------- cabeçalho de página ---------- */
 .ds-page-head { margin: 2px 0 20px; }
 .ds-overline { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--text-3); }
@@ -302,6 +313,19 @@ def html_marca(rotulo: str) -> str:
     )
 
 
+def html_login_cabecalho(rotulo: str, titulo: str, subtitulo: str = "") -> str:
+    """Topo do cartão de login: logo Martinelli (os dois; o CSS escolhe pelo
+    tema), rótulo, título e subtítulo, tudo centralizado."""
+    sub = f"<p>{html.escape(subtitulo)}</p>" if subtitulo else ""
+    return (
+        '<div class="ds-login-head">'
+        f'<img class="ds-logo-l" src="{_logo_uri("light")}" alt="Martinelli Advogados">'
+        f'<img class="ds-logo-d" src="{_logo_uri("dark")}" alt="Martinelli Advogados">'
+        f'<div class="ds-overline">{html.escape(rotulo)}</div>'
+        f"<h1>{html.escape(titulo)}</h1>{sub}</div>"
+    )
+
+
 def html_cabecalho(rotulo: str, titulo: str, subtitulo: str = "") -> str:
     sub = f"<p>{html.escape(subtitulo)}</p>" if subtitulo else ""
     return (
@@ -357,6 +381,15 @@ def marca_lateral(rotulo: str) -> None:
 
 def cabecalho_pagina(rotulo: str, titulo: str, subtitulo: str = "") -> None:
     st.markdown(html_cabecalho(rotulo, titulo, subtitulo), unsafe_allow_html=True)
+
+
+def cabecalho_login(rotulo: str, titulo: str, subtitulo: str = "") -> None:
+    st.markdown(html_login_cabecalho(rotulo, titulo, subtitulo), unsafe_allow_html=True)
+
+
+def nota_de_opcao(texto: str) -> None:
+    """Linha pequena e centralizada sob um botão de escolha."""
+    st.markdown(f'<p class="ds-opcao-nota">{html.escape(texto)}</p>', unsafe_allow_html=True)
 
 
 def titulo_cartao(titulo: str, sub: str = "") -> None:

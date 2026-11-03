@@ -40,10 +40,6 @@ st.set_page_config(page_title="Mapeador Tributário PR", page_icon="⚖️",
                    layout="wide")
 design.injetar_tema()
 
-with st.sidebar:
-    design.marca_lateral("Mapeador Tributário PR")
-
-
 def _persistir(lote):
     """Grava o lote no banco e devolve o resumo de novos/atualizados."""
     with armazenamento.sessao(_CAMINHO_BANCO) as conn:
@@ -252,46 +248,72 @@ def _mostra_resumo(resultado):
         )
 
 
-def _tela_inicial():
-    """Escolha de perfil. Consulta entra direto; Administrador exige a senha
-    de .streamlit/secrets.toml e fica desabilitado se ela não estiver
-    configurada (nunca cai em acesso aberto)."""
-    design.cabecalho_pagina("Mapeador de Consultas e Regimes Especiais — PR",
-                            "Como deseja entrar?",
-                            "Escolha o perfil para continuar.")
-    esperada = acesso.senha_admin(st.secrets)
-    col_consulta, col_admin = st.columns(2)
+def _entrar_como(perfil_escolhido: str):
+    st.session_state["perfil"] = perfil_escolhido
+    st.session_state.pop("login_etapa", None)
+    st.rerun()
 
-    with col_consulta, st.container(border=True, key="perfil-consulta"):
-        design.icone_cartao("search", "primary")
-        st.subheader("Consulta")
-        st.caption("Pesquisar as consultas e os regimes já mapeados. Sem senha.")
-        if st.button("Entrar para consultar", key="entrar-consulta", type="primary"):
-            st.session_state["perfil"] = acesso.PERFIL_CONSULTA
-            st.rerun()
 
-    with col_admin, st.container(border=True, key="perfil-admin"):
-        design.icone_cartao("lock", "charcoal")
-        st.subheader("Administrador")
-        st.caption("Importar PDFs e reprocessar o banco. Exige senha.")
-        if esperada is None:
-            st.warning("Senha do administrador não configurada. Crie "
-                       ".streamlit/secrets.toml com a seção [admin] e a chave senha (veja o README).")
+def _login_escolha(senha_configurada: bool):
+    """Etapa 1: escolher o perfil. Consulta entra direto; Administrador segue
+    para a etapa da senha (e fica desabilitado se a senha não estiver
+    configurada — nunca cai em acesso aberto)."""
+    design.cabecalho_login("Mapeador Tributário PR", "Como deseja entrar?",
+                           "Escolha o perfil para continuar.")
+    if st.button("Consulta", key="entrar-consulta", type="primary",
+                 icon=":material/search:", width="stretch"):
+        _entrar_como(acesso.PERFIL_CONSULTA)
+    design.nota_de_opcao("Pesquisar os atos já mapeados. Sem senha.")
+
+    if st.button("Administrador", key="entrar-admin", icon=":material/lock:",
+                 disabled=not senha_configurada, width="stretch"):
+        st.session_state["login_etapa"] = "senha"
+        st.rerun()
+    design.nota_de_opcao("Importar PDFs e gerenciar o banco. Exige senha.")
+    if not senha_configurada:
+        st.warning("Senha do administrador não configurada. Crie "
+                   ".streamlit/secrets.toml com a seção [admin] e a chave senha (veja o README).")
+
+
+def _login_senha(esperada: str):
+    """Etapa 2: senha do administrador (Enter também confirma)."""
+    design.cabecalho_login("Administrador", "Digite a senha",
+                           "Acesso para importar PDFs e gerenciar o banco.")
+    with st.form("form-login", border=False):
         senha = st.text_input("Senha", type="password", key="senha-admin",
-                              disabled=esperada is None)
-        if st.button("Entrar como administrador", key="entrar-admin",
-                     disabled=esperada is None):
-            if acesso.confere(senha, esperada):
-                st.session_state["perfil"] = acesso.PERFIL_ADMIN
-                st.rerun()
-            else:
-                st.error("Senha incorreta.")
+                              placeholder="Senha do administrador")
+        confirmou = st.form_submit_button("Entrar", key="confirmar-admin",
+                                          type="primary", icon=":material/login:",
+                                          width="stretch")
+    if confirmou:
+        if acesso.confere(senha, esperada):
+            _entrar_como(acesso.PERFIL_ADMIN)
+        st.error("Senha incorreta.")
+    if st.button("Voltar", key="voltar-login", type="tertiary",
+                 icon=":material/arrow_back:", width="stretch"):
+        st.session_state.pop("login_etapa", None)
+        st.rerun()
+
+
+def _tela_login():
+    """Login centralizado na tela, em duas etapas: escolha do perfil e, para o
+    Administrador, a senha de .streamlit/secrets.toml."""
+    esperada = acesso.senha_admin(st.secrets)
+    with st.container(border=True, key="card-login"):
+        if st.session_state.get("login_etapa") == "senha" and esperada is not None:
+            _login_senha(esperada)
+        else:
+            st.session_state.pop("login_etapa", None)
+            _login_escolha(esperada is not None)
 
 
 perfil = st.session_state.get("perfil")
 if perfil not in (acesso.PERFIL_CONSULTA, acesso.PERFIL_ADMIN):
-    _tela_inicial()
+    _tela_login()
     st.stop()
+
+with st.sidebar:
+    design.marca_lateral("Mapeador Tributário PR")
 
 try:
     with armazenamento.sessao(_CAMINHO_BANCO):
@@ -448,6 +470,6 @@ with st.sidebar:
     design.perfil_lateral(_PERFIS[perfil], "Perfil atual")
     if st.button("Trocar perfil", key="trocar-perfil",
                  icon=":material/swap_horiz:", width="stretch"):
-        for chave in ("perfil", "resultado", "analise"):
+        for chave in ("perfil", "resultado", "analise", "login_etapa"):
             st.session_state.pop(chave, None)
         st.rerun()

@@ -70,9 +70,15 @@ mesmo padrão dos demais artefatos do escritório.
 - O menu ⋮ mostra só opções de visualização (tema, imprimir); as de
   desenvolvedor (Deploy, Rerun, Clear cache) ficam ocultas.
 
-Ao abrir, a **tela inicial** pede o perfil. O botão **Trocar perfil**, na barra
-lateral, volta a ela; atualizar a página (F5) também, pois o perfil vive só na
-sessão.
+O **login** aparece centralizado na tela, em duas etapas:
+
+1. **Escolha do perfil**: *Consulta* entra direto; *Administrador* segue para a
+   senha (fica desabilitado enquanto a senha não estiver configurada).
+2. **Senha** (só do Administrador): Enter ou **Entrar** confirma; **Voltar**
+   retorna à escolha do perfil.
+
+O botão **Trocar perfil**, na barra lateral, volta à escolha do perfil;
+atualizar a página (F5) também, pois o perfil vive só na sessão.
 
 | Perfil | Acesso | Abas |
 |---|---|---|
