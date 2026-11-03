@@ -237,3 +237,88 @@ def test_opcao_nao_aceita_outra_flag_como_valor(tmp_path, capsys, monkeypatch):
     assert codigo == 1
     assert "Uso:" in capsys.readouterr().out
     assert not (cwd / "--dedup").exists()
+
+
+# --- ajustes manuais x reimportação ----------------------------------------
+def _importa_e_ajusta_o_protocolo(tmp_path):
+    """Importa o PDF de consultas e, como o administrador faria na interface, ajusta o
+    Protocolo da consulta 001/2026. Devolve (pasta, banco)."""
+    from core import edicao
+    pasta = tmp_path / "pdfs"
+    pasta.mkdir()
+    shutil.copy(os.path.join(FIX, "Consultas_1_a_3_de_2026.pdf"), pasta / "c.pdf")
+    banco = tmp_path / "m.db"
+    assert processar.main([str(pasta), "--banco", str(banco)]) == 0
+    conn = armazenamento.conectar(str(banco))
+    edicao.editar_registro(conn, 'consulta', {'Ano': '2026', 'Nº da Consulta': '001'},
+                           {'Protocolo': 'AJUSTADO'})
+    conn.close()
+    return pasta, banco
+
+
+def _protocolo(banco):
+    conn = armazenamento.conectar(str(banco))
+    try:
+        achado = [r for r in armazenamento.buscar_consultas(conn) if r['Nº da Consulta'] == '001']
+        return achado[0]['Protocolo']
+    finally:
+        conn.close()
+
+
+def test_reimportar_mantem_o_ajuste_manual_e_avisa(tmp_path, capsys):
+    pasta, banco = _importa_e_ajusta_o_protocolo(tmp_path)
+    capsys.readouterr()
+
+    codigo = processar.main([str(pasta), "--banco", str(banco)])
+
+    assert codigo == 0
+    assert _protocolo(banco) == 'AJUSTADO'
+    saida = capsys.readouterr().out
+    assert "Ajustes manuais encontrados" in saida and "Consulta 001/2026" in saida
+    assert "mantidos" in saida
+
+
+def test_sobrescrever_ajustes_aplica_o_valor_do_pdf(tmp_path, capsys):
+    pasta, banco = _importa_e_ajusta_o_protocolo(tmp_path)
+    capsys.readouterr()
+
+    codigo = processar.main([str(pasta), "--banco", str(banco), "--sobrescrever-ajustes"])
+
+    assert codigo == 0
+    assert _protocolo(banco) == '25.152.191-3'
+    assert "Valor do PDF aplicado" in capsys.readouterr().out
+
+
+def test_simular_mostra_os_ajustes_sem_alterar_o_banco(tmp_path, capsys):
+    pasta, banco = _importa_e_ajusta_o_protocolo(tmp_path)
+    capsys.readouterr()
+    conn = armazenamento.conectar(str(banco))
+    antes = conn.execute("SELECT COUNT(*) FROM historico").fetchone()[0]
+    conn.close()
+
+    codigo = processar.main([str(pasta), "--banco", str(banco), "--simular"])
+
+    assert codigo == 0
+    assert "Ajustes manuais encontrados" in capsys.readouterr().out
+    assert _protocolo(banco) == 'AJUSTADO'
+    conn = armazenamento.conectar(str(banco))
+    assert conn.execute("SELECT COUNT(*) FROM historico").fetchone()[0] == antes
+    conn.close()
+
+
+def test_simular_em_banco_do_schema_antigo_nao_o_migra(tmp_path):
+    pasta = tmp_path / "pdfs"
+    pasta.mkdir()
+    shutil.copy(os.path.join(FIX, "Consultas_1_a_3_de_2026.pdf"), pasta / "c.pdf")
+    banco = tmp_path / "antigo.db"
+    conn = armazenamento.conectar(str(banco))
+    armazenamento.criar_esquema(conn)
+    conn.execute("PRAGMA user_version = 2")
+    conn.commit()
+    conn.close()
+
+    assert processar.main([str(pasta), "--banco", str(banco), "--simular"]) == 0
+
+    conn = armazenamento.conectar(str(banco))
+    assert armazenamento.versao_do_schema(conn) == 2      # continua como estava
+    conn.close()

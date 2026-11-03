@@ -65,3 +65,19 @@ def test_criterio_de_dedup_invalido_e_recusado():
 def test_forcar_invalido_continua_sendo_erro_de_programacao():
     with pytest.raises(ValueError):
         Execucao().carregar([(CONSULTAS_PDF, "c.pdf")], forcar='outro')
+
+
+def test_gravar_repassa_o_sobrescrever_ao_armazenamento(tmp_path):
+    from core import edicao
+    ex = Execucao()
+    ex.carregar([(CONSULTAS_PDF, "c.pdf")])
+    with armazenamento.sessao(str(tmp_path / "s.db")) as conn:
+        ex.gravar(conn)
+        edicao.editar_registro(conn, 'consulta', {'Ano': '2026', 'Nº da Consulta': '001'},
+                               {'Protocolo': 'AJUSTADO'})
+        ex.gravar(conn)                                         # padrão: mantém o ajuste
+        assert [r for r in armazenamento.buscar_consultas(conn)
+                if r['Nº da Consulta'] == '001'][0]['Protocolo'] == 'AJUSTADO'
+        ex.gravar(conn, sobrescrever=[('consulta', '2026', '001')])
+        assert [r for r in armazenamento.buscar_consultas(conn)
+                if r['Nº da Consulta'] == '001'][0]['Protocolo'] != 'AJUSTADO'

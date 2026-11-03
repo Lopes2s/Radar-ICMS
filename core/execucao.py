@@ -39,10 +39,13 @@ class Execucao:
         self.diagnostico = diagnostico.diagnosticar(self.lote)
         return self.lote
 
-    def gravar(self, conn) -> dict:
-        """Persiste o lote carregado. Devolve o resumo de novos/atualizados."""
+    def gravar(self, conn, sobrescrever=()) -> dict:
+        """Persiste o lote carregado. Devolve o resumo de novos/atualizados.
+
+        `sobrescrever`: itens ('consulta'|'regime', *chave) cujos ajustes manuais o
+        PDF deve vencer (ver edicao.ajustes_em_conflito); os demais ajustes são mantidos."""
         self._progresso('gravacao', 0, 1, '')
-        resultado = armazenamento.persistir_lote(conn, self.lote)
+        resultado = armazenamento.persistir_lote(conn, self.lote, sobrescrever)
         self._progresso('gravacao', 1, 1, '')
         return resultado
 

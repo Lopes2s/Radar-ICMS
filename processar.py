@@ -1,9 +1,12 @@
 # processar.py
 """CLI: python processar.py <pasta_com_pdfs> [--banco arquivo.db] [--xlsx saida.xlsx]
                             [--dedup primeira|completo|recente] [--simular]
+                            [--sobrescrever-ajustes]
 
 Persiste no banco por padrão. A planilha é uma exportação opcional (--xlsx).
 --simular lê e diagnostica os PDFs sem gravar nada.
+Atos que o administrador ajustou à mão na interface MANTÊM o valor ajustado ao
+reimportar; --sobrescrever-ajustes faz o valor do PDF vencer em todos eles.
 
 Códigos de saída: 0 = tudo certo; 1 = uso incorreto, nenhum PDF, planilha
 aberta no Excel ou banco de versão mais nova; 2 = algum PDF não pôde ser lido
@@ -16,7 +19,8 @@ import sys
 from core.bootstrap import DEPS_CLI, garantir_dependencias, tolera_encoding_do_console
 
 _USO = ("Uso: python processar.py <pasta_com_pdfs> [--banco arquivo.db] "
-        "[--xlsx saida.xlsx] [--dedup primeira|completo|recente] [--simular]")
+        "[--xlsx saida.xlsx] [--dedup primeira|completo|recente] [--simular] "
+        "[--sobrescrever-ajustes]")
 
 
 def main(argv=None) -> int:
@@ -39,6 +43,7 @@ def main(argv=None) -> int:
         print(f"{_USO}\n({erro})")
         return 1
     simular = "--simular" in argv
+    sobrescrever_ajustes = "--sobrescrever-ajustes" in argv
 
     pdfs = sorted(glob.glob(os.path.join(pasta, "*.pdf")))
     if not pdfs:
@@ -48,7 +53,7 @@ def main(argv=None) -> int:
     # dentro do main (e não no import) para que importar este módulo — nos
     # testes, por exemplo — nunca dispare um pip install.
     garantir_dependencias(DEPS_CLI)
-    from core import armazenamento, log, pipeline, planilha  # noqa: E402
+    from core import armazenamento, edicao, log, pipeline, planilha  # noqa: E402
     from core.execucao import Execucao  # noqa: E402
 
     dedup = dedup or pipeline.CRITERIO_PADRAO
@@ -64,12 +69,17 @@ def main(argv=None) -> int:
     erros = execucao.arquivos_com_erro()
 
     if simular:
+        _conflitos_na_simulacao(armazenamento, edicao, banco, lote)
         print("\nSimulação: nada foi gravado no banco.")
         return _finaliza(erros)
 
     try:
         with armazenamento.sessao(banco) as conn:
-            resultado = execucao.gravar(conn)
+            conflitos = edicao.ajustes_em_conflito(conn, lote)
+            _imprime_conflitos(conflitos, sobrescrever_ajustes)
+            sobrescrever = ([edicao.chave_do_item(i) for i in conflitos]
+                            if sobrescrever_ajustes else ())
+            resultado = execucao.gravar(conn, sobrescrever)
     except armazenamento.SchemaMaisNovo as erro:
         print(f"\n{erro}", file=sys.stderr)
         _imprime_erros(erros)
@@ -93,6 +103,29 @@ def main(argv=None) -> int:
     if xlsx:
         print(f"  Planilha:  {xlsx}")
     return _finaliza(erros)
+
+
+def _imprime_conflitos(conflitos: list, sobrescrevendo: bool) -> None:
+    """Atos com ajuste manual cujo valor difere do PDF."""
+    if not conflitos:
+        return
+    print(f"\nAjustes manuais encontrados em {len(conflitos)} ato(s):")
+    for item in conflitos:
+        for c in item['campos']:
+            print(f"  - {item['rotulo']} · {c['campo']}: ajustado {c['atual']!r} | PDF {c['pdf']!r}")
+    print("Valor do PDF aplicado (--sobrescrever-ajustes)." if sobrescrevendo else
+          "Valores ajustados mantidos. Use --sobrescrever-ajustes para aplicar o PDF.")
+
+
+def _conflitos_na_simulacao(armazenamento, edicao, banco, lote) -> None:
+    """Na simulação só LÊ: se o banco já existe e está no schema atual, mostra os
+    ajustes que seriam mantidos; nunca cria nem migra o banco."""
+    if not os.path.exists(armazenamento.caminho_do_banco(banco)):
+        return
+    with armazenamento.aberta(banco) as conn:
+        if armazenamento.versao_do_schema(conn) < armazenamento.SCHEMA_VERSAO:
+            return
+        _imprime_conflitos(edicao.ajustes_em_conflito(conn, lote), False)
 
 
 def _finaliza(erros: list) -> int:
