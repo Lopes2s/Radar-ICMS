@@ -174,3 +174,12 @@ def test_ajustes_do_ato_por_tipo(tmp_path):
         assert consulta.ajustes(c, 'regime', {**ato, 'CNPJ REQUERENTE': '00'}) == []
         with pytest.raises(ValueError):
             consulta.ajustes(c, 'outro', ato)
+
+def test_receita_devolve_a_consulta_do_cnpj_do_regime(conn):
+    regime = {'CNPJ REQUERENTE': '00.000.000/0001-91'}
+    assert consulta.receita(conn, regime) is None
+    armazenamento.salvar_cnpj_receita(
+        conn, {'cnpj': '00000000000191', 'cnae_codigo': '6422100',
+               'cnae_descricao': 'Bancos múltiplos', 'situacao': 'ATIVA'})
+    assert consulta.receita(conn, regime)['cnae_codigo'] == '6422100'
+    assert consulta.receita(conn, {'CNPJ REQUERENTE': ''}) is None

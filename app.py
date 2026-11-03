@@ -14,7 +14,8 @@ garantir_dependencias(DEPS_APP)
 
 import streamlit as st  # noqa: E402
 
-from core import acesso, armazenamento, consulta, diagnostico, edicao, log, planilha  # noqa: E402
+from core import (acesso, armazenamento, cnpj, consulta, diagnostico, edicao,  # noqa: E402
+                  log, planilha)
 from core.execucao import Execucao  # noqa: E402
 from core.pdf_text import MARCA_CITACAO  # noqa: E402
 from interface import design, formularios  # noqa: E402
@@ -159,9 +160,73 @@ def _salvar_edicao(tipo: str, registro: dict, colunas: list, prefixo: str):
     _fecha_selecao_da_tabela()
 
 
+def _avisar_receita(resumo):
+    """Deixa para o toast o resultado da consulta de CNPJs feita ao gravar."""
+    mensagem = cnpj.mensagem_do_resumo(resumo)
+    if mensagem:
+        st.session_state["aviso"] = f"Receita Federal: {mensagem}"
+
+
+def _consultar_cnpj(cnpj_do_regime: str):
+    """Consulta (ou refaz a consulta de) um CNPJ pelo detalhe do regime. Roda no
+    on_click do botão: o toast sai na reexecução seguinte e o detalhe continua aberto."""
+    acesso.exige_admin(st.session_state.get("perfil"))
+    with armazenamento.sessao(_CAMINHO_BANCO) as conn:
+        resumo = cnpj.atualizar(conn, [cnpj_do_regime], forcar=True)
+    if resumo["consultados"]:
+        st.session_state["aviso"] = "Receita Federal: CNPJ consultado."
+    elif resumo["falhas"]:
+        st.session_state["aviso"] = f"Receita Federal: {resumo['falhas'][0][1]}."
+    else:
+        st.session_state["aviso"] = "Receita Federal: CNPJ em branco ou inválido, nada a consultar."
+
+
+def _aplicar_cnae(registro: dict, receita: dict):
+    """Grava no regime o CNAE da Receita (vira ajuste manual, com histórico)."""
+    acesso.exige_admin(st.session_state.get("perfil"))
+    chave_atual = {c: registro[c] for c in edicao.TIPOS["regime"][2]}
+    novos = {"CNAE REQUERENTE": cnpj.formatar_cnae(receita["cnae_codigo"]),
+             "DESCRIÇÃO CNAE": receita["cnae_descricao"]}
+    try:
+        with armazenamento.sessao(_CAMINHO_BANCO) as conn:
+            r = edicao.editar_registro(conn, "regime", chave_atual, novos)
+    except edicao.RegistroInexistente as erro:
+        st.session_state["aviso"] = str(erro)
+        return
+    _avisar(r, "CNAE aplicado")
+    _fecha_selecao_da_tabela()
+
+
+def _bloco_receita(registro: dict, receita, pode_editar: bool):
+    """CNAE e situação do CNPJ na Receita Federal (BrasilAPI), guardados à parte do regime."""
+    st.markdown('<div class="icms-campo-detalhe-rotulo">Receita Federal (BrasilAPI)</div>',
+                unsafe_allow_html=True)
+    if not receita:
+        st.caption("CNPJ ainda não consultado.")
+    else:
+        st.write(f"CNAE principal: {cnpj.formatar_cnae(receita['cnae_codigo'])}"
+                 f" — {receita['cnae_descricao']}")
+        st.write(f"Situação cadastral: {receita['situacao'] or '—'}")
+        st.caption(f"Consultado em {_data_br(receita['consultado_em'])}. É o CNAE atual da "
+                   "empresa, que pode diferir do vigente na data do regime.")
+        divergente = cnpj.divergencia(registro, receita)
+        if divergente:
+            st.warning(f"O CNAE informado no regime ({divergente['regime']}) difere do "
+                       f"da Receita ({divergente['receita']}).")
+    if not pode_editar:
+        return
+    st.button("Atualizar consulta" if receita else "Consultar CNPJ", key="consultar-cnpj",
+              icon=":material/search:", on_click=_consultar_cnpj,
+              args=(registro.get("CNPJ REQUERENTE", ""),))
+    if (receita and receita["cnae_codigo"]
+            and cnpj.so_digitos(registro.get("CNAE REQUERENTE")) != receita["cnae_codigo"]):
+        st.button("Aplicar CNAE da Receita ao regime", key="aplicar-cnae",
+                  icon=":material/check:", on_click=_aplicar_cnae, args=(registro, receita))
+
+
 @st.dialog("Detalhes", width="large", on_dismiss=_fecha_selecao_da_tabela)
 def _mostra_detalhe(tipo: str, registro: dict, colunas: list, historico=(),
-                    pode_editar: bool = False, ajustes=()):
+                    pode_editar: bool = False, ajustes=(), receita=None):
     st.subheader(_titulo_do_registro(tipo, registro))
     chave = edicao.TIPOS[tipo][2]
     prefixo = formularios.prefixo_de(tipo, [registro[c] for c in chave])
@@ -192,6 +257,8 @@ def _mostra_detalhe(tipo: str, registro: dict, colunas: list, historico=(),
             st.markdown(_resposta_em_paragrafos(valor), unsafe_allow_html=True)
         else:
             st.write(valor)
+    if tipo == "regime":
+        _bloco_receita(registro, receita, pode_editar)
     if pode_editar:
         st.button("Editar", key="editar-registro", icon=":material/edit:",
                   on_click=_comecar_edicao, args=(prefixo,))
@@ -259,6 +326,10 @@ def _gravar(analise, sobrescrever=()):
     acesso.exige_admin(st.session_state.get("perfil"))
     lote = analise["lote"]
     mapeamento = _persistir(lote, sobrescrever)
+    if cnpj.habilitada():
+        with st.spinner("Consultando os CNPJs na Receita Federal…"):
+            with armazenamento.sessao(_CAMINHO_BANCO) as conn:
+                _avisar_receita(cnpj.atualizar_do_lote(conn, lote))
 
     # planilha em memória, exportação opcional: nada de cópia em disco
     buf = io.BytesIO()
@@ -602,7 +673,9 @@ def _renderiza_consultar(conn):
                 _mostra_detalhe(tipo, completo, cols_do_tipo,
                                 consulta.historico(conn, tipo, completo),
                                 pode_editar=(perfil == acesso.PERFIL_ADMIN),
-                                ajustes=consulta.ajustes(conn, tipo, completo))
+                                ajustes=consulta.ajustes(conn, tipo, completo),
+                                receita=(consulta.receita(conn, completo)
+                                         if tipo == "regime" else None))
 
         st.download_button(
             "Baixar estes resultados (.xlsx)",

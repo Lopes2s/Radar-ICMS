@@ -816,3 +816,136 @@ def test_na_analise_trocar_a_chave_de_ato_ja_gravado_mostra_o_erro_e_nada_muda()
     lote = at.session_state["analise"]["lote"]
     assert lote.regimes[0]['CNPJ REQUERENTE'] == REGIME['CNPJ REQUERENTE']
     assert lote.chaves_substituidas == []
+
+# --- consulta do CNPJ (Receita Federal) --------------------------------------
+CNPJ_DO_REGIME = '11222333000181'
+
+
+def _com_rede(monkeypatch):
+    from tests.test_cnpj import Rede
+    rede = Rede()
+    monkeypatch.setenv('MAPEADOR_CONSULTA_CNPJ', '1')
+    monkeypatch.setattr('core.cnpj._abrir', rede)
+    return rede
+
+
+def _guarda_receita(cnae_codigo='6422100'):
+    conn = _banco_do_teste()
+    armazenamento.salvar_cnpj_receita(
+        conn, {'cnpj': CNPJ_DO_REGIME, 'razao_social': 'Alfa Ltda', 'cnae_codigo': cnae_codigo,
+               'cnae_descricao': 'Bancos múltiplos', 'situacao': 'ATIVA'},
+        consultado_em='2026-11-03T12:00:00+00:00')
+    conn.close()
+
+
+def _textos(at):
+    return [m.value for m in at.markdown] + [c.value for c in at.caption]
+
+
+def test_detalhe_do_regime_sem_consulta_avisa_e_so_o_admin_ve_o_botao():
+    at = _abre_o_detalhe_do_regime("consulta")
+    assert any("ainda não consultado" in t for t in _textos(at))
+    assert "consultar-cnpj" not in {b.key for b in at.button}
+    at = _abre_o_detalhe_do_regime("admin")
+    assert any("ainda não consultado" in t for t in _textos(at))
+    assert "consultar-cnpj" in {b.key for b in at.button}
+
+
+def test_detalhe_mostra_o_cnae_e_a_situacao_da_receita_para_qualquer_perfil():
+    _guarda_receita()
+    at = _abre_o_detalhe_do_regime("consulta")
+    textos = " ".join(_textos(at))
+    assert "6422-1/00" in textos and "Bancos múltiplos" in textos and "ATIVA" in textos
+    assert "03/11/2026" in textos
+    assert not {"consultar-cnpj", "aplicar-cnae"} & {b.key for b in at.button}
+
+
+def test_admin_consulta_o_cnpj_pelo_detalhe(monkeypatch):
+    rede = _com_rede(monkeypatch)
+    at = _abre_o_detalhe_do_regime("admin")
+    _linha_0(at)
+    at.button(key="consultar-cnpj").click().run(timeout=30)
+    assert not at.exception
+    assert rede.urls == [f'https://brasilapi.com.br/api/cnpj/v1/{CNPJ_DO_REGIME}']
+    assert any("CNPJ consultado" in t.value for t in at.toast)
+    _linha_0(at)
+    at.run(timeout=30)
+    assert "6422-1/00" in " ".join(_textos(at))
+    assert "aplicar-cnae" in {b.key for b in at.button}
+
+
+def test_consulta_pelo_detalhe_mostra_o_motivo_quando_a_rede_falha(monkeypatch):
+    import urllib.error
+    from tests.test_cnpj import Rede
+    monkeypatch.setattr('core.cnpj._abrir', Rede(erro=urllib.error.URLError('sem rede')))
+    at = _abre_o_detalhe_do_regime("admin")
+    _linha_0(at)
+    at.button(key="consultar-cnpj").click().run(timeout=30)
+    assert not at.exception
+    assert any("sem acesso à BrasilAPI" in t.value for t in at.toast)
+
+
+def test_admin_aplica_o_cnae_da_receita_ao_regime():
+    _guarda_receita()
+    at = _abre_o_detalhe_do_regime("admin")
+    _linha_0(at)
+    at.button(key="aplicar-cnae").click().run(timeout=30)
+    assert not at.exception
+    linha = _regimes_no_banco()[0]
+    assert linha['CNAE REQUERENTE'] == '6422-1/00'
+    assert linha['DESCRIÇÃO CNAE'] == 'Bancos múltiplos'
+    from core import consulta
+    conn = _banco_do_teste()
+    assert set(consulta.ajustes(conn, 'regime', REGIME)) == {'CNAE REQUERENTE', 'DESCRIÇÃO CNAE'}
+    conn.close()
+    assert any("CNAE aplicado" in t.value for t in at.toast)
+
+
+def test_divergencia_de_cnae_aparece_so_quando_o_regime_ja_tem_outro_cnae():
+    _guarda_receita()
+    at = _abre_o_detalhe_do_regime("admin", regimes=({**REGIME, 'CNAE REQUERENTE': '4930-2/02'},))
+    assert any("difere" in w.value and "4930-2/02" in w.value and "6422-1/00" in w.value
+               for w in at.warning)
+    at = _abre_o_detalhe_do_regime("admin")           # CNAE em branco: sem divergência
+    assert not any("difere" in w.value for w in at.warning)
+
+
+def test_gravar_na_analise_consulta_os_cnpjs_e_avisa(monkeypatch):
+    rede = _com_rede(monkeypatch)
+    at = _app("admin")
+    at.session_state["analise"] = _analise_com(_lote_sem_vigencia())
+    at.run(timeout=30)
+    at.button(key="gravar").click().run(timeout=30)
+    assert not at.exception
+    assert rede.urls == [f'https://brasilapi.com.br/api/cnpj/v1/{CNPJ_DO_REGIME}']
+    assert any("Receita Federal: 1 CNPJ(s) consultado(s)" in t.value for t in at.toast)
+    assert set(at.session_state["resultado"]) == {
+        "arquivos", "consultas", "regimes", "descartes", "mapeamento", "xlsx"}
+    conn = _banco_do_teste()
+    assert armazenamento.cnpj_receita_de(conn, CNPJ_DO_REGIME)['cnae_codigo'] == '6422100'
+    conn.close()
+
+
+def test_gravar_sem_internet_grava_e_avisa(monkeypatch):
+    import urllib.error
+    from tests.test_cnpj import Rede
+    monkeypatch.setenv('MAPEADOR_CONSULTA_CNPJ', '1')
+    monkeypatch.setattr('core.cnpj._abrir', Rede(erro=urllib.error.URLError('sem rede')))
+    at = _app("admin")
+    at.session_state["analise"] = _analise_com(_lote_sem_vigencia())
+    at.run(timeout=30)
+    at.button(key="gravar").click().run(timeout=30)
+    assert not at.exception
+    assert len(_regimes_no_banco()) == 1
+    assert any("Receita Federal:" in t.value and "sem resposta" in t.value for t in at.toast)
+
+
+def test_gravar_com_a_consulta_desligada_nao_chama_a_rede(monkeypatch):
+    rede = _com_rede(monkeypatch)
+    monkeypatch.setenv('MAPEADOR_CONSULTA_CNPJ', '0')
+    at = _app("admin")
+    at.session_state["analise"] = _analise_com(_lote_sem_vigencia())
+    at.run(timeout=30)
+    at.button(key="gravar").click().run(timeout=30)
+    assert not at.exception
+    assert rede.urls == [] and len(_regimes_no_banco()) == 1

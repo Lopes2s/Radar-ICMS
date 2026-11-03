@@ -100,3 +100,9 @@ def ajustes(conn, tipo: str, registro: dict) -> list:
     chave = CHAVES[tipo]
     return armazenamento.ajustes_de(conn, _TABELAS[tipo], chave,
                                     tuple(registro.get(c, '') for c in chave))
+
+
+def receita(conn, registro: dict):
+    """Dados do CNPJ do regime na Receita Federal (CNAE e situação), guardados em
+    cnpj_receita; None se o CNPJ ainda não foi consultado."""
+    return armazenamento.cnpj_receita_de(conn, registro.get('CNPJ REQUERENTE'))
