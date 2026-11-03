@@ -220,3 +220,41 @@ def test_persistir_lote_repassa_o_sobrescrever_e_mantem_o_formato_do_retorno(tmp
     chave = ('regime', *tuple(_chave_regime().values()))
     armazenamento.persistir_lote(conn, lote, sobrescrever=[chave])
     assert armazenamento.buscar_regimes(conn)[0]['VIGÊNCIA DO RE'] == ''
+
+
+# --- conflitos para a análise ----------------------------------------------
+def test_conflitos_listam_so_atos_ajustados_cujo_pdf_diverge(tmp_path):
+    conn = _conn(tmp_path)
+    armazenamento.salvar_regimes(conn, [_regime(), _regime(**{'Nº DO REGIME ESPECIAL': '2/2026'})])
+    edicao.editar_registro(conn, 'regime', _chave_regime(), {'VIGÊNCIA DO RE': '12 meses'})
+
+    lote = pipeline.Lote(regimes=[_regime(**{'VIGÊNCIA DO RE': ''}),
+                                  _regime(**{'Nº DO REGIME ESPECIAL': '2/2026'})])
+    itens = edicao.ajustes_em_conflito(conn, lote)
+
+    assert len(itens) == 1
+    assert itens[0]['tipo'] == 'regime' and itens[0]['rotulo'] == 'RE 9.053/2026'
+    assert itens[0]['campos'] == [{'campo': 'VIGÊNCIA DO RE', 'atual': '12 meses', 'pdf': ''}]
+    assert edicao.chave_do_item(itens[0]) == ('regime', '9.053/2026', '11.222.333/0001-81')
+
+
+def test_sem_divergencia_ou_sem_ato_gravado_nao_ha_conflito(tmp_path):
+    conn = _conn(tmp_path)
+    armazenamento.salvar_regimes(conn, [_regime()])
+    edicao.editar_registro(conn, 'regime', _chave_regime(), {'VIGÊNCIA DO RE': '12 meses'})
+    igual = pipeline.Lote(regimes=[_regime(**{'VIGÊNCIA DO RE': '12 meses'})])
+    novo = pipeline.Lote(regimes=[_regime(**{'Nº DO REGIME ESPECIAL': '7/2026'})])
+    assert edicao.ajustes_em_conflito(conn, igual) == []
+    assert edicao.ajustes_em_conflito(conn, novo) == []
+
+
+def test_conflito_usa_a_chave_atual_quando_o_pdf_traz_a_chave_antiga(tmp_path):
+    conn = _conn(tmp_path)
+    errado = _regime(**{'CNPJ REQUERENTE': '00'})
+    armazenamento.salvar_regimes(conn, [errado])
+    edicao.editar_registro(conn, 'regime', {c: errado[c] for c in CHAVE_R},
+                           {'CNPJ REQUERENTE': '11', 'EMPRESA': 'Corrigida'})
+    itens = edicao.ajustes_em_conflito(conn, pipeline.Lote(regimes=[errado]))
+    assert len(itens) == 1
+    assert itens[0]['chave']['CNPJ REQUERENTE'] == '11'
+    assert itens[0]['campos'] == [{'campo': 'EMPRESA', 'atual': 'Corrigida', 'pdf': 'Alfa Ltda'}]

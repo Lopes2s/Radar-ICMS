@@ -98,3 +98,43 @@ def editar_registro(conn, tipo: str, chave_atual: dict, novos: dict) -> dict:
         conn.rollback()
         raise
     return {'alterados': alterados, 'chave_trocada': trocada}
+
+
+def rotulo_do_ato(tipo: str, chave_dict: dict) -> str:
+    """'Consulta 001/2026' ou 'RE 9.053/2026' (mesmos rótulos do diagnóstico)."""
+    if tipo == 'consulta':
+        return f"Consulta {chave_dict.get('Nº da Consulta', '')}/{chave_dict.get('Ano', '')}"
+    return f"RE {chave_dict.get('Nº DO REGIME ESPECIAL', '')}"
+
+
+def chave_do_item(item: dict) -> tuple:
+    """('consulta'|'regime', *valores) de um item de `ajustes_em_conflito`; é o formato
+    que `persistir_lote(..., sobrescrever=...)` espera."""
+    chave = TIPOS[item['tipo']][2]
+    return (item['tipo'], *(item['chave'][c] for c in chave))
+
+
+def ajustes_em_conflito(conn, lote) -> list:
+    """Atos do `lote` que já têm ajuste manual no banco e cujo valor do PDF DIFERE
+    do ajuste. Para cada um: {'tipo', 'chave' (chave atual), 'rotulo', 'campos':
+    [{'campo', 'atual' (ajustado), 'pdf'}]}. Só lê o banco."""
+    itens = []
+    for tipo, registros in (('consulta', lote.consultas), ('regime', lote.regimes)):
+        tabela, colunas, chave = TIPOS[tipo]
+        for reg in registros:
+            recebida = tuple(_texto(reg.get(c)) for c in chave)
+            chave_atual = armazenamento.resolver_chave(conn, tabela, chave, recebida)
+            salvo = armazenamento.buscar_detalhe(conn, tabela, chave,
+                                                 dict(zip(chave, chave_atual)))
+            if salvo is None:
+                continue
+            campos = []
+            for campo in armazenamento.ajustes_de(conn, tabela, chave, chave_atual):
+                manual, do_pdf = _texto(salvo.get(campo)), _texto(reg.get(campo))
+                if manual != do_pdf:
+                    campos.append({'campo': campo, 'atual': manual, 'pdf': do_pdf})
+            if campos:
+                chave_dict = dict(zip(chave, chave_atual))
+                itens.append({'tipo': tipo, 'chave': chave_dict, 'campos': campos,
+                              'rotulo': rotulo_do_ato(tipo, chave_dict)})
+    return itens
