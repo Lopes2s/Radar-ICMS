@@ -2,6 +2,7 @@
 import io
 
 import pytest
+from openpyxl import load_workbook
 from core import armazenamento, consulta
 
 
@@ -84,3 +85,53 @@ def test_exportar_xlsx_sem_resultados_ainda_gera_planilha_valida():
 def test_exportar_xlsx_tipo_invalido_levanta_erro():
     with pytest.raises(ValueError):
         consulta.exportar_xlsx('algo_que_nao_existe', [])
+
+
+def test_exportar_busca_abre_conexao_propria_e_devolve_xlsx(tmp_path):
+    caminho = str(tmp_path / "e.db")
+    with armazenamento.sessao(caminho) as c:
+        armazenamento.salvar_consultas(c, [
+            {'Ano': '2026', 'Nº da Consulta': '001', 'Súmula': 'ICMS',
+             'Problema da Consulta': 'madeira'},
+            {'Ano': '2026', 'Nº da Consulta': '002', 'Súmula': 'ICMS',
+             'Problema da Consulta': 'soja'},
+        ])
+
+    dados = consulta.exportar_busca('consulta', texto='madeira', caminho_bd=caminho)
+
+    ws = load_workbook(io.BytesIO(dados))['Consultas — a revisar']
+    assert ws.max_row == 2  # cabeçalho + 1 resultado
+
+
+def test_buscar_lista_traz_so_colunas_leves_e_detalhe_traz_tudo(tmp_path):
+    with armazenamento.sessao(str(tmp_path / "l.db")) as c:
+        armazenamento.salvar_consultas(c, [
+            {'Ano': '2026', 'Nº da Consulta': '001', 'Súmula': 'ICMS',
+             'Resposta': 'resposta completa'}])
+        lista = consulta.buscar_lista(c, 'consulta')
+        assert 'Resposta' not in lista[0]
+        assert lista[0]['Súmula'] == 'ICMS'
+        completo = consulta.detalhe(c, 'consulta', lista[0])
+        assert completo['Resposta'] == 'resposta completa'
+
+
+def test_detalhe_de_registro_inexistente_devolve_none(tmp_path):
+    with armazenamento.sessao(str(tmp_path / "l.db")) as c:
+        assert consulta.detalhe(c, 'regime', {'Nº DO REGIME ESPECIAL': 'x',
+                                              'CNPJ REQUERENTE': 'y'}) is None
+
+
+def test_buscar_lista_tipo_invalido_levanta_erro(tmp_path):
+    with armazenamento.sessao(str(tmp_path / "l.db")) as c:
+        with pytest.raises(ValueError):
+            consulta.buscar_lista(c, 'outro')
+
+
+def test_historico_do_registro_por_tipo(tmp_path):
+    with armazenamento.sessao(str(tmp_path / "h.db")) as c:
+        base = {'Ano': '2026', 'Nº da Consulta': '001', 'Protocolo': ''}
+        armazenamento.salvar_consultas(c, [base])
+        armazenamento.salvar_consultas(c, [{**base, 'Protocolo': 'x'}])
+        itens = consulta.historico(c, 'consulta', base)
+        assert len(itens) == 1
+        assert itens[0]['campos_alterados'] == ['Protocolo']

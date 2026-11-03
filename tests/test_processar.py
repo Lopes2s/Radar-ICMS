@@ -74,7 +74,7 @@ def test_xlsx_gerado_quando_pedido_explicitamente(tmp_path):
     codigo = processar.main([str(pasta), "--banco", str(tmp_path / "m.db"),
                              "--xlsx", str(xlsx)])
 
-    assert codigo == 0
+    assert codigo == 2
     wb = load_workbook(xlsx)
     assert "Consultas — a revisar" in wb.sheetnames
     arquivos = {a['Arquivo']: a for a in _aba_arquivos(xlsx)}
@@ -136,3 +136,104 @@ def test_saida_com_acento_nao_quebra_em_console_ascii(tmp_path, monkeypatch):
     assert codigo == 0  # sucesso não pode virar código 1 só por causa do print
     saida = buf.getvalue().decode('ascii')
     assert "Consultas" in saida  # os acentos viraram '?', mas não travou
+
+
+def test_processar_grava_o_log_na_pasta_de_dados(tmp_path):
+    pasta = tmp_path / "pdfs"
+    pasta.mkdir()
+    shutil.copy(os.path.join(FIX, "Consultas_1_a_3_de_2026.pdf"), pasta / "c.pdf")
+
+    processar.main([str(pasta), "--banco", str(tmp_path / "m.db")])
+
+    assert os.path.exists(os.path.join(os.environ["MAPEADOR_DADOS"], "logs", "app.log"))
+
+
+def _pasta_com(tmp_path, *, corrompido=False):
+    pasta = tmp_path / "pdfs"
+    pasta.mkdir()
+    shutil.copy(os.path.join(FIX, "Consultas_1_a_3_de_2026.pdf"), pasta / "c.pdf")
+    if corrompido:
+        (pasta / "corrompido.pdf").write_bytes(b"isto nao e um pdf")
+    return pasta
+
+
+def test_pdf_com_erro_sai_com_2_grava_os_bons_e_nomeia_o_erro(tmp_path, capsys):
+    pasta = _pasta_com(tmp_path, corrompido=True)
+    banco = tmp_path / "m.db"
+
+    codigo = processar.main([str(pasta), "--banco", str(banco)])
+
+    assert codigo == 2
+    conn = armazenamento.conectar(str(banco))
+    assert len(armazenamento.buscar_consultas(conn)) == 3  # os bons foram gravados
+    err = capsys.readouterr().err
+    assert "corrompido.pdf" in err
+    assert "Erro" in err or "erro" in err
+
+
+def test_simular_nao_grava_e_mostra_o_diagnostico(tmp_path, capsys):
+    pasta = _pasta_com(tmp_path)
+    banco = tmp_path / "m.db"
+
+    codigo = processar.main([str(pasta), "--banco", str(banco), "--simular"])
+
+    assert codigo == 0
+    assert not banco.exists()
+    assert "nada foi gravado" in capsys.readouterr().out
+
+
+def test_dedup_invalido_mostra_o_uso(tmp_path, capsys):
+    pasta = _pasta_com(tmp_path)
+    codigo = processar.main([str(pasta), "--dedup", "aleatorio"])
+    assert codigo == 1
+    assert "Uso:" in capsys.readouterr().out
+
+
+def test_dedup_valido_e_aceito(tmp_path):
+    pasta = _pasta_com(tmp_path)
+    codigo = processar.main([str(pasta), "--banco", str(tmp_path / "m.db"),
+                             "--dedup", "completo"])
+    assert codigo == 0
+
+
+def test_banco_de_versao_mais_nova_sai_com_1_e_mensagem(tmp_path, capsys):
+    pasta = _pasta_com(tmp_path)
+    banco = tmp_path / "m.db"
+    conn = armazenamento.conectar(str(banco))
+    conn.execute(f"PRAGMA user_version = {armazenamento.SCHEMA_VERSAO + 1}")
+    conn.commit()
+    conn.close()
+
+    codigo = processar.main([str(pasta), "--banco", str(banco)])
+
+    assert codigo == 1
+    assert "mais nova" in capsys.readouterr().err
+
+
+def test_schema_mais_novo_tambem_lista_o_arquivo_com_erro(tmp_path, capsys):
+    pasta = _pasta_com(tmp_path, corrompido=True)
+    banco = tmp_path / "m.db"
+    conn = armazenamento.conectar(str(banco))
+    conn.execute(f"PRAGMA user_version = {armazenamento.SCHEMA_VERSAO + 1}")
+    conn.commit()
+    conn.close()
+
+    codigo = processar.main([str(pasta), "--banco", str(banco)])
+
+    assert codigo == 1
+    err = capsys.readouterr().err
+    assert "mais nova" in err
+    assert "corrompido.pdf" in err
+
+
+def test_opcao_nao_aceita_outra_flag_como_valor(tmp_path, capsys, monkeypatch):
+    pasta = _pasta_com(tmp_path)
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+
+    codigo = processar.main([str(pasta), "--banco", "--dedup", "completo"])
+
+    assert codigo == 1
+    assert "Uso:" in capsys.readouterr().out
+    assert not (cwd / "--dedup").exists()

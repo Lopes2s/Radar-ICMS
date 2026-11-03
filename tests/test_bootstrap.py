@@ -9,7 +9,7 @@ from core import bootstrap
 def test_le_specs_do_requirements():
     specs = bootstrap._specs_do_requirements()
     assert specs['pdfplumber'] == 'pdfplumber>=0.11.9,<0.12'
-    assert specs['streamlit'] == 'streamlit>=1.50,<2'
+    assert specs['streamlit'] == 'streamlit>=1.63,<2'
     assert 'pytest' not in specs  # dependência de desenvolvimento
 
 
@@ -47,10 +47,10 @@ def test_instala_o_que_falta_com_a_versao_do_requirements(monkeypatch):
                                                  silencioso=True)
 
     # só o ausente é instalado, e com o pino declarado no requirements.txt
-    assert instalados == ['streamlit>=1.50,<2']
+    assert instalados == ['streamlit>=1.63,<2']
     assert len(chamadas) == 1
     assert chamadas[0][:4] == [sys.executable, '-m', 'pip', 'install']
-    assert chamadas[0][-1] == 'streamlit>=1.50,<2'
+    assert chamadas[0][-1] == 'streamlit>=1.63,<2'
 
 
 def test_variavel_de_ambiente_desliga_instalacao(monkeypatch):
@@ -63,7 +63,7 @@ def test_variavel_de_ambiente_desliga_instalacao(monkeypatch):
     with pytest.raises(bootstrap.DependenciaAusente) as erro:
         bootstrap.garantir_dependencias(['streamlit'], silencioso=True)
 
-    assert 'streamlit>=1.50,<2' in str(erro.value)
+    assert 'streamlit>=1.63,<2' in str(erro.value)
     assert chamou == []  # nada foi instalado
 
 
@@ -79,7 +79,7 @@ def test_falha_do_pip_vira_erro_acionavel(monkeypatch):
         bootstrap.garantir_dependencias(['streamlit'], silencioso=True)
 
     # a mensagem precisa dizer o que instalar na mão
-    assert 'pip install streamlit>=1.50,<2' in str(erro.value)
+    assert 'pip install streamlit>=1.63,<2' in str(erro.value)
 
 
 def test_pip_que_nao_instala_de_fato_e_detectado(monkeypatch):
@@ -98,9 +98,9 @@ def test_pip_que_nao_instala_de_fato_e_detectado(monkeypatch):
 # ---- versão instalada abaixo do piso do requirements.txt conta como ausente ----
 
 def test_versao_atende_faixa():
-    spec = 'streamlit>=1.50,<2'
+    spec = 'streamlit>=1.63,<2'
     assert bootstrap._versao_atende('1.64.0', spec)
-    assert bootstrap._versao_atende('1.50', spec)
+    assert bootstrap._versao_atende('1.63', spec)
     assert not bootstrap._versao_atende('1.30.0', spec)
     assert not bootstrap._versao_atende('2.0.0', spec)
     assert bootstrap._versao_atende('0.11.9', 'pdfplumber>=0.11.9,<0.12')
@@ -113,7 +113,7 @@ def test_versao_atende_sem_pino_ou_operador_desconhecido():
 
 
 def test_versao_com_sufixo_pre_release_compara_pela_parte_numerica():
-    assert bootstrap._versao_atende('1.50.0rc1', 'streamlit>=1.50,<2')
+    assert bootstrap._versao_atende('1.63.0rc1', 'streamlit>=1.63,<2')
 
 
 def test_streamlit_desatualizado_conta_como_faltando(monkeypatch):
@@ -121,7 +121,7 @@ def test_streamlit_desatualizado_conta_como_faltando(monkeypatch):
     monkeypatch.setattr(bootstrap, '_versao_instalada',
                         lambda pacote: '1.30.0' if pacote == 'streamlit' else '3.1.5')
     monkeypatch.setattr(bootstrap, '_specs_do_requirements',
-                        lambda: {'streamlit': 'streamlit>=1.50,<2',
+                        lambda: {'streamlit': 'streamlit>=1.63,<2',
                                  'openpyxl': 'openpyxl>=3.1.5,<3.2'})
     assert bootstrap.faltando(['openpyxl', 'streamlit']) == ['streamlit']
 
@@ -186,5 +186,5 @@ def test_desatualizado_e_atualizado_com_o_pino_do_requirements(monkeypatch):
     monkeypatch.delenv(bootstrap._VAR_DESLIGA, raising=False)
 
     assert bootstrap.garantir_dependencias(['streamlit'], silencioso=True) == [
-        'streamlit>=1.50,<2']
-    assert chamadas[0][-1] == 'streamlit>=1.50,<2'
+        'streamlit>=1.63,<2']
+    assert chamadas[0][-1] == 'streamlit>=1.63,<2'

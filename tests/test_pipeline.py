@@ -1,4 +1,6 @@
 # tests/test_pipeline.py
+import hashlib
+import logging
 import os
 import shutil
 
@@ -178,3 +180,119 @@ def test_falha_nos_paragrafos_cai_no_texto_achatado(monkeypatch):
     assert linha["Consultas"] == 3
     achatado = consultas.parse(pdf_text.texto_simples(CONSULTAS_PDF))
     assert [r["Resposta"] for r in lote.consultas] == [r["Resposta"] for r in achatado]
+
+
+def test_falha_ao_processar_e_registrada_no_log_com_traceback(tmp_path, caplog):
+    ruim = tmp_path / "corrompido.pdf"
+    ruim.write_bytes(b"isto nao e um pdf")
+    with caplog.at_level(logging.ERROR, logger="mapeador"):
+        pipeline.processar_arquivo(pipeline.Lote(), str(ruim), "corrompido.pdf")
+    assert any("corrompido.pdf" in r.getMessage() and r.exc_info
+               for r in caplog.records)
+
+
+def _c(x, **extra):
+    return {'Ano': '2026', 'Nº da Consulta': '001', 'x': x, **extra}
+
+
+def test_dedup_completo_fica_com_o_registro_mais_preenchido():
+    linhas = [_c('a', Resposta=''), _c('b', Resposta='texto')]
+    out = pipeline.dedup(linhas, pipeline.CHAVE_CONSULTAS, criterio='completo')
+    assert [r['x'] for r in out] == ['b']
+
+
+def test_dedup_completo_empata_na_primeira():
+    out = pipeline.dedup([_c('a'), _c('b')], pipeline.CHAVE_CONSULTAS,
+                         criterio='completo')
+    assert [r['x'] for r in out] == ['a']
+
+
+def test_dedup_recente_usa_a_data_e_empata_no_ultimo_processado():
+    mais_nova_primeiro = [_c('a', **{'Data da Publicação': '2026-02-01'}),
+                          _c('b', **{'Data da Publicação': '2026-01-01'})]
+    out = pipeline.dedup(mais_nova_primeiro, pipeline.CHAVE_CONSULTAS,
+                         criterio='recente')
+    assert [r['x'] for r in out] == ['a']
+
+    sem_data = [_c('a'), _c('b')]
+    out = pipeline.dedup(sem_data, pipeline.CHAVE_CONSULTAS, criterio='recente')
+    assert [r['x'] for r in out] == ['b']
+
+
+def test_dedup_recente_funciona_para_regimes_pela_coluna_data():
+    chave = pipeline.CHAVE_REGIMES
+    base = {'Nº DO REGIME ESPECIAL': '1/2026', 'CNPJ REQUERENTE': '11'}
+    linhas = [{**base, 'x': 'a', 'DATA': '2026-03-01'},
+              {**base, 'x': 'b', 'DATA': '2026-04-01'}]
+    out = pipeline.dedup(linhas, chave, criterio='recente')
+    assert [r['x'] for r in out] == ['b']
+
+
+def test_dedup_mantem_a_ordem_de_chegada_das_chaves():
+    linhas = [_c('a'), {'Ano': '2026', 'Nº da Consulta': '002', 'x': 'c'},
+              _c('b', Resposta='mais completo')]
+    out = pipeline.dedup(linhas, pipeline.CHAVE_CONSULTAS, criterio='completo')
+    assert [r['Nº da Consulta'] for r in out] == ['001', '002']
+    assert out[0]['x'] == 'b'
+
+
+def test_dedup_criterio_invalido_e_erro_de_programacao():
+    with pytest.raises(ValueError):
+        pipeline.dedup([], pipeline.CHAVE_CONSULTAS, criterio='aleatorio')
+
+
+def test_finalizar_aceita_o_criterio():
+    lote = pipeline.Lote(consultas=[_c('a', Resposta=''), _c('b', Resposta='t')])
+    pipeline.finalizar(lote, criterio='completo')
+    assert [r['x'] for r in lote.consultas] == ['b']
+
+
+def test_processar_arquivo_registra_hash_e_origem():
+    lote = pipeline.Lote()
+    pipeline.processar_arquivo(lote, CONSULTAS_PDF, "consultas.pdf")
+
+    with open(CONSULTAS_PDF, "rb") as fh:
+        esperado = hashlib.sha256(fh.read()).hexdigest()
+    assert lote.importacoes == [{'arquivo': 'consultas.pdf', 'sha256': esperado,
+                                 'tipo': 'consulta', 'n_registros': 3}]
+    r = lote.consultas[0]
+    assert lote.origem[('consulta', r['Ano'], r['Nº da Consulta'])] == 'consultas.pdf'
+
+
+def test_origem_de_regime_usa_numero_e_cnpj():
+    lote = pipeline.Lote()
+    pipeline.processar_arquivo(lote, KRONA_PDF, "krona.pdf")
+    r = lote.regimes[0]
+    chave = ('regime', r['Nº DO REGIME ESPECIAL'], r['CNPJ REQUERENTE'])
+    assert lote.origem[chave] == 'krona.pdf'
+    assert lote.importacoes[0]['tipo'] == 'regime'
+    assert lote.importacoes[0]['n_registros'] == 2
+
+
+def test_arquivo_com_erro_nao_gera_importacao(tmp_path):
+    ruim = tmp_path / "corrompido.pdf"
+    ruim.write_bytes(b"isto nao e um pdf")
+    lote = pipeline.Lote()
+    pipeline.processar_arquivo(lote, str(ruim), "corrompido.pdf")
+    assert lote.importacoes == []
+    assert lote.origem == {}
+
+
+def test_linha_do_arquivo_continua_com_as_seis_chaves():
+    lote = pipeline.Lote()
+    linha = pipeline.processar_arquivo(lote, CONSULTAS_PDF, "consultas.pdf")
+    assert list(linha) == ['Arquivo', 'Tipo', 'Consultas', 'Regimes', 'Descartes', 'Erro']
+
+
+def test_falha_no_hash_nao_deixa_o_lote_pela_metade(monkeypatch):
+    def _quebra(caminho):
+        raise OSError("sem acesso")
+    monkeypatch.setattr(pipeline, "_sha256", _quebra)
+    lote = pipeline.Lote()
+
+    linha = pipeline.processar_arquivo(lote, CONSULTAS_PDF, "c.pdf")
+
+    assert linha['Tipo'] == 'erro'
+    assert lote.consultas == []
+    assert lote.origem == {}
+    assert lote.importacoes == []

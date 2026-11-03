@@ -1,4 +1,9 @@
 # tests/test_armazenamento.py
+import os
+import sqlite3
+
+import pytest
+
 from core import armazenamento, pipeline
 
 
@@ -193,3 +198,239 @@ def test_persistir_lote_grava_consultas_e_regimes_de_uma_vez(tmp_path):
                          'regimes': {'novos': 1, 'atualizados': 0}}
     assert len(armazenamento.buscar_consultas(conn)) == 1
     assert len(armazenamento.buscar_regimes(conn)) == 1
+
+
+def test_pasta_dados_usa_a_variavel_e_cria_a_pasta(tmp_path, monkeypatch):
+    alvo = tmp_path / "dados" / "fundo"
+    monkeypatch.setenv("MAPEADOR_DADOS", str(alvo))
+    assert armazenamento.pasta_dados() == str(alvo)
+    assert alvo.is_dir()
+
+
+def test_pasta_dados_sem_variavel_e_a_raiz_do_projeto(monkeypatch):
+    monkeypatch.delenv("MAPEADOR_DADOS", raising=False)
+    assert armazenamento.pasta_dados() == armazenamento._RAIZ
+
+
+def test_caminho_do_banco_respeita_a_precedencia(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAPEADOR_DADOS", str(tmp_path))
+    monkeypatch.delenv("MAPEADOR_BANCO", raising=False)
+    assert armazenamento.caminho_do_banco() == os.path.join(str(tmp_path), "mapeamento.db")
+    monkeypatch.setenv("MAPEADOR_BANCO", str(tmp_path / "x.db"))
+    assert armazenamento.caminho_do_banco() == str(tmp_path / "x.db")
+    assert armazenamento.caminho_do_banco("explicito.db") == "explicito.db"
+
+
+def test_conectar_sem_caminho_cai_na_pasta_de_dados(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAPEADOR_DADOS", str(tmp_path))
+    monkeypatch.delenv("MAPEADOR_BANCO", raising=False)
+    conn = armazenamento.conectar()
+    conn.execute("CREATE TABLE t (x)")
+    conn.commit()
+    conn.close()
+    assert (tmp_path / "mapeamento.db").exists()
+
+
+def test_aberta_fecha_a_conexao_ao_sair(tmp_path):
+    with armazenamento.aberta(str(tmp_path / "a.db")) as conn:
+        conn.execute("SELECT 1")
+    with pytest.raises(sqlite3.ProgrammingError):
+        conn.execute("SELECT 1")
+
+
+def test_sessao_cria_o_esquema_e_fecha_mesmo_com_erro(tmp_path):
+    caminho = str(tmp_path / "s.db")
+    with pytest.raises(RuntimeError):
+        with armazenamento.sessao(caminho) as conn:
+            assert armazenamento.buscar_consultas(conn) == []
+            raise RuntimeError("falha")
+    with pytest.raises(sqlite3.ProgrammingError):
+        conn.execute("SELECT 1")
+
+
+def test_criar_esquema_grava_a_versao_do_schema(tmp_path):
+    conn = _conn(tmp_path)
+    assert armazenamento.versao_do_schema(conn) == armazenamento.SCHEMA_VERSAO
+
+
+def test_banco_antigo_sem_versao_e_atualizado_sem_perder_dados(tmp_path):
+    conn = armazenamento.conectar(str(tmp_path / "antigo.db"))
+    conn.execute('CREATE TABLE consultas ("Ano" TEXT, "Nº da Consulta" TEXT, '
+                 'UNIQUE("Ano", "Nº da Consulta"))')
+    conn.execute("INSERT INTO consultas VALUES (?, ?)", ("2025", "007"))
+    conn.commit()
+    assert armazenamento.versao_do_schema(conn) == 0
+
+    armazenamento.criar_esquema(conn)
+
+    assert armazenamento.versao_do_schema(conn) == armazenamento.SCHEMA_VERSAO
+    assert armazenamento.buscar_consultas(conn)[0]["Nº da Consulta"] == "007"
+
+
+def test_banco_de_versao_mais_nova_e_recusado_sem_ser_alterado(tmp_path):
+    conn = armazenamento.conectar(str(tmp_path / "novo.db"))
+    conn.execute(f"PRAGMA user_version = {armazenamento.SCHEMA_VERSAO + 1}")
+    conn.commit()
+
+    with pytest.raises(armazenamento.SchemaMaisNovo) as exc:
+        armazenamento.criar_esquema(conn)
+
+    assert str(armazenamento.SCHEMA_VERSAO + 1) in str(exc.value)
+    criou = conn.execute(
+        "SELECT name FROM sqlite_master WHERE name = 'consultas'").fetchone()
+    assert criou is None
+
+
+def _consulta(**campos):
+    base = {'Ano': '2026', 'Nº da Consulta': '001', 'Data da Publicação': '2026-01-19',
+            'Protocolo': '', 'Súmula': '', 'Problema da Consulta': '',
+            'CNAE Detectado': '', 'Resposta': ''}
+    return {**base, **campos}
+
+
+def test_busca_ignora_acentos_e_caixa(tmp_path):
+    conn = _conn(tmp_path)
+    armazenamento.salvar_consultas(conn, [_consulta(**{'Súmula': 'Substituição Tributária'})])
+    assert len(armazenamento.buscar_consultas(conn, texto='SUBSTITUICAO')) == 1
+    assert len(armazenamento.buscar_consultas(conn, texto='substituição tributária')) == 1
+
+
+def test_busca_alcanca_a_resposta_mesmo_atravessando_paragrafos(tmp_path):
+    conn = _conn(tmp_path)
+    armazenamento.salvar_consultas(conn, [
+        _consulta(Resposta='primeiro trecho\n\nsegundo trecho do fisco')])
+    # a frase atravessa a quebra de parágrafo ("\n\n" vira um espaço na comparação)
+    assert len(armazenamento.buscar_consultas(conn, texto='trecho segundo')) == 1
+    assert len(armazenamento.buscar_consultas(conn, texto='segundo   trecho')) == 1
+    assert len(armazenamento.buscar_consultas(conn, texto='segundo primeiro')) == 0
+
+
+def test_percentual_e_sublinhado_valem_como_texto_literal(tmp_path):
+    conn = _conn(tmp_path)
+    armazenamento.salvar_consultas(conn, [
+        _consulta(**{'Nº da Consulta': '001', 'Súmula': 'desconto de 10% no preço'}),
+        _consulta(**{'Nº da Consulta': '002', 'Súmula': 'prazo de 10 dias'}),
+        _consulta(**{'Nº da Consulta': '003', 'Súmula': 'campo_um'}),
+        _consulta(**{'Nº da Consulta': '004', 'Súmula': 'campoXum'}),
+    ])
+    achadas = armazenamento.buscar_consultas(conn, texto='10%')
+    assert [r['Nº da Consulta'] for r in achadas] == ['001']
+    achadas = armazenamento.buscar_consultas(conn, texto='campo_um')
+    assert [r['Nº da Consulta'] for r in achadas] == ['003']
+
+
+def test_texto_so_com_espacos_equivale_a_sem_filtro(tmp_path):
+    conn = _conn(tmp_path)
+    armazenamento.salvar_consultas(conn, [_consulta(), _consulta(**{'Nº da Consulta': '002'})])
+    assert len(armazenamento.buscar_consultas(conn, texto='   ')) == 2
+
+
+def test_busca_de_regime_por_cnpj_e_por_numero(tmp_path):
+    conn = _conn(tmp_path)
+    armazenamento.salvar_regimes(conn, [
+        {'ANO': '2026', 'Nº DO REGIME ESPECIAL': '10.001/2026',
+         'CNPJ REQUERENTE': '11.222.333/0001-81', 'EMPRESA': 'Alfa'},
+        {'ANO': '2026', 'Nº DO REGIME ESPECIAL': '10.002/2026',
+         'CNPJ REQUERENTE': '44.555.666/0001-00', 'EMPRESA': 'Beta'},
+    ])
+    assert [r['EMPRESA'] for r in armazenamento.buscar_regimes(conn, texto='0001-81')] == ['Alfa']
+    assert [r['EMPRESA'] for r in armazenamento.buscar_regimes(conn, texto='10.002')] == ['Beta']
+
+
+def test_buscar_com_colunas_devolve_so_as_pedidas(tmp_path):
+    conn = _conn(tmp_path)
+    armazenamento.salvar_consultas(conn, [_consulta(Resposta='texto longo')])
+    linhas = armazenamento.buscar_consultas(conn, colunas=['Ano', 'Nº da Consulta'])
+    assert list(linhas[0]) == ['Ano', 'Nº da Consulta']
+
+
+def test_buscar_detalhe_pela_chave_natural(tmp_path):
+    conn = _conn(tmp_path)
+    armazenamento.salvar_consultas(conn, [_consulta(Resposta='texto longo')])
+    achado = armazenamento.buscar_detalhe(
+        conn, 'consultas', pipeline.CHAVE_CONSULTAS,
+        {'Ano': '2026', 'Nº da Consulta': '001'})
+    assert achado['Resposta'] == 'texto longo'
+    ausente = armazenamento.buscar_detalhe(
+        conn, 'consultas', pipeline.CHAVE_CONSULTAS,
+        {'Ano': '1999', 'Nº da Consulta': '9'})
+    assert ausente is None
+
+
+def test_colunas_da_lista_incluem_a_chave_natural():
+    assert set(pipeline.CHAVE_CONSULTAS) <= set(armazenamento.COLUNAS_LISTA_CONSULTAS)
+    assert set(pipeline.CHAVE_REGIMES) <= set(armazenamento.COLUNAS_LISTA_REGIMES)
+
+
+def test_reimportar_registro_identico_nao_cria_historico(tmp_path):
+    conn = _conn(tmp_path)
+    reg = _consulta(**{'Súmula': 'ICMS'})
+    armazenamento.salvar_consultas(conn, [reg])
+    armazenamento.salvar_consultas(conn, [reg])
+    chave = {'Ano': '2026', 'Nº da Consulta': '001'}
+    assert armazenamento.historico_de(conn, 'consultas', chave) == []
+
+
+def test_reimportar_com_campo_diferente_cria_uma_linha_de_historico(tmp_path):
+    conn = _conn(tmp_path)
+    armazenamento.salvar_consultas(conn, [_consulta(Protocolo='')])
+    resultado = armazenamento.salvar_consultas(conn, [_consulta(Protocolo='25.152.191-3')])
+
+    assert resultado == {'novos': 0, 'atualizados': 1}  # contrato inalterado
+    chave = {'Ano': '2026', 'Nº da Consulta': '001'}
+    historico = armazenamento.historico_de(conn, 'consultas', chave)
+    assert len(historico) == 1
+    assert historico[0]['campos_alterados'] == ['Protocolo']
+    assert historico[0]['registro_anterior']['Protocolo'] == ''
+    assert historico[0]['versao_app']
+    assert armazenamento.buscar_consultas(conn)[0]['Protocolo'] == '25.152.191-3'
+
+
+def test_historico_vem_do_mais_recente_para_o_mais_antigo(tmp_path):
+    conn = _conn(tmp_path)
+    for protocolo in ('1', '2', '3'):
+        armazenamento.salvar_consultas(conn, [_consulta(Protocolo=protocolo)])
+    chave = {'Ano': '2026', 'Nº da Consulta': '001'}
+    anteriores = [h['registro_anterior']['Protocolo']
+                  for h in armazenamento.historico_de(conn, 'consultas', chave)]
+    assert anteriores == ['2', '1']
+
+
+def test_historico_de_regime_usa_a_chave_numero_mais_cnpj(tmp_path):
+    conn = _conn(tmp_path)
+    base = {'ANO': '2026', 'Nº DO REGIME ESPECIAL': '1/2026',
+            'CNPJ REQUERENTE': '11', 'EMENTA': 'a'}
+    armazenamento.salvar_regimes(conn, [base])
+    armazenamento.salvar_regimes(conn, [{**base, 'EMENTA': 'b'}])
+    chave = {'Nº DO REGIME ESPECIAL': '1/2026', 'CNPJ REQUERENTE': '11'}
+    assert armazenamento.historico_de(conn, 'regimes', chave)[0]['campos_alterados'] == ['EMENTA']
+
+
+def test_persistir_lote_registra_as_importacoes_sem_mudar_o_retorno(tmp_path):
+    conn = _conn(tmp_path)
+    lote = pipeline.Lote(
+        consultas=[_consulta()],
+        importacoes=[{'arquivo': 'c.pdf', 'sha256': 'abc', 'tipo': 'consulta',
+                      'n_registros': 1}])
+    resultado = armazenamento.persistir_lote(conn, lote)
+    assert resultado == {'consultas': {'novos': 1, 'atualizados': 0},
+                         'regimes': {'novos': 0, 'atualizados': 0}}
+    linha = conn.execute("SELECT * FROM importacoes").fetchone()
+    assert (linha['arquivo'], linha['sha256'], linha['tipo'], linha['n_registros']) == \
+           ('c.pdf', 'abc', 'consulta', 1)
+    assert linha['importado_em'] and linha['versao_app']
+
+
+def test_schema_sobe_para_a_versao_2_e_banco_v1_e_migrado(tmp_path):
+    conn = armazenamento.conectar(str(tmp_path / "v1.db"))
+    armazenamento.criar_esquema(conn)
+    conn.execute("DROP TABLE historico")
+    conn.execute("DROP TABLE importacoes")
+    conn.execute("PRAGMA user_version = 1")
+    conn.commit()
+
+    armazenamento.criar_esquema(conn)
+
+    assert armazenamento.versao_do_schema(conn) == 2
+    conn.execute("SELECT COUNT(*) FROM historico")
+    conn.execute("SELECT COUNT(*) FROM importacoes")

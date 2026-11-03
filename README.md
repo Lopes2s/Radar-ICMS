@@ -54,8 +54,15 @@ Limites, a rever na hospedagem multiusuário:
 ## Uso (linha de comando)
 
     python processar.py <pasta_com_pdfs> [--banco arquivo.db] [--xlsx saida.xlsx]
+                        [--dedup primeira|completo|recente] [--simular]
 
-Sem `--banco`, usa `mapeamento.db` na raiz do projeto. Reprocessar a mesma
+`--simular` lê e diagnostica os PDFs sem gravar nada. `--dedup` escolhe qual
+registro fica quando o mesmo ato aparece em mais de um arquivo (padrão:
+`primeira`). Códigos de saída: 0 = tudo certo; 1 = uso incorreto, nenhum PDF,
+planilha aberta no Excel ou banco de versão mais nova; 2 = algum PDF falhou
+(os demais foram gravados) — cada erro é listado, por arquivo, em stderr.
+
+Sem `--banco`, usa `MAPEADOR_BANCO` se definido; senão `mapeamento.db` na pasta de dados (`MAPEADOR_DADOS`, padrão: a raiz do projeto). Reprocessar a mesma
 pasta não duplica: cada consulta/regime já mapeado é atualizado (upsert pela
 chave natural), não repetido. `--xlsx` é totalmente opcional — sem ele,
 nenhuma planilha é gerada.
@@ -90,6 +97,19 @@ nova: `sqlite3` é da biblioteca padrão do Python.
   Sem itálico nem fonte menor no PDF, nenhum parágrafo é tratado como citação.
 - Consultas **já mapeadas** só ganham parágrafos ao **reimportar o PDF**
   (o upsert atualiza o registro, sem duplicar).
+
+## Dados, logs e histórico
+- `MAPEADOR_DADOS` define a pasta do banco e dos logs (padrão: a raiz do projeto);
+  `MAPEADOR_BANCO` aponta um arquivo de banco específico, na interface e na CLI.
+- O log fica em `<dados>/logs/app.log` (rotativo, ~1 MB × 3) e traz o traceback das falhas.
+- Reimportar um ato com dados diferentes **atualiza** o registro e guarda a versão
+  anterior na tabela `historico` (aparece em "Histórico de alterações" no detalhe).
+  Cada PDF importado é registrado em `importacoes` com o SHA-256 e a versão do app.
+- O banco guarda a versão do schema (`PRAGMA user_version`). Um banco criado por
+  versão mais nova é recusado, sem alteração, até a ferramenta ser atualizada.
+- Na aba Processar, **Analisar** lê os PDFs e mostra o diagnóstico (erros por arquivo,
+  CNPJ inválido, campos vazios, datas fora do padrão) sem gravar; **Gravar no banco**
+  só grava depois. Os arquivos com erro não impedem a gravação dos demais.
 
 ## Testes
 As dependências de desenvolvimento ficam separadas das de uso:
@@ -129,6 +149,8 @@ autor) nem caches:
 
     git archive --format=zip -o mapeador_pr.zip HEAD
 
+O Mapeador.bat cria um .venv na pasta da ferramenta na primeira execução (precisa de internet nessa vez).
+
 ## Estrutura
 - core/pdf_text.py  — extração de texto (1 coluna, 2 colunas, detecção de fonte);
   `texto_com_paragrafos` reconstrói os parágrafos da Resposta
@@ -142,6 +164,11 @@ autor) nem caches:
 - core/bootstrap.py — verificação e instalação das dependências
 - app.py / processar.py — interface e CLI
 - iniciar.py — abre a interface preparando o ambiente antes
+- core/execucao.py  — execução completa (carregar → diagnosticar → gravar), usada pela CLI e pela interface
+- core/diagnostico.py — erros e avisos do lote antes de gravar
+- core/texto.py     — normalização de texto para a busca
+- core/log.py       — log em arquivo
+- core/versao.py    — versão do app
 - Mapeador.bat — atalho de duplo-clique para o iniciar.py
 
 ## Fora deste escopo (fase 2)

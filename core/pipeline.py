@@ -4,11 +4,16 @@
 Processa um PDF por vez e acumula o resultado num Lote. Uma falha num PDF
 vira uma linha de erro em `lote.arquivos` e nunca interrompe os demais.
 """
+import hashlib
+import logging
+import re
 from dataclasses import dataclass, field
 
 from core import pdf_text
 from parsers import consultas as p_consultas
 from parsers import regimes as p_regimes
+
+log = logging.getLogger('mapeador')
 
 CHAVE_CONSULTAS = ['Ano', 'Nº da Consulta']
 CHAVE_REGIMES = ['Nº DO REGIME ESPECIAL', 'CNPJ REQUERENTE']
@@ -22,17 +27,54 @@ class Lote:
     descartes: list = field(default_factory=list)
     # uma linha por PDF: Arquivo, Tipo, Consultas, Regimes, Descartes, Erro
     arquivos: list = field(default_factory=list)
+    # um item por PDF lido: {'arquivo', 'sha256', 'tipo', 'n_registros'}
+    importacoes: list = field(default_factory=list)
+    # ('consulta', Ano, Nº) / ('regime', Nº RE, CNPJ) -> nome do 1º arquivo de origem
+    origem: dict = field(default_factory=dict)
 
 
-def dedup(linhas, campos):
-    """Remove repetidos pela chave `campos`, mantendo a primeira ocorrência."""
-    vistos, unicos = set(), []
+CRITERIOS_DEDUP = ('primeira', 'completo', 'recente')
+CRITERIO_PADRAO = 'primeira'
+_DATA_ISO = re.compile(r'\d{4}-\d{2}-\d{2}')
+
+
+def _preenchidos(registro: dict) -> int:
+    return sum(1 for v in registro.values() if str(v or '').strip())
+
+
+def _data_iso(registro: dict) -> str:
+    """Data do ato em AAAA-MM-DD ('' se ausente ou fora do padrão)."""
+    for campo in ('Data da Publicação', 'DATA'):
+        valor = str(registro.get(campo, '') or '')
+        if _DATA_ISO.fullmatch(valor):
+            return valor
+    return ''
+
+
+def _prefere_o_novo(criterio: str, novo: dict, atual: dict) -> bool:
+    if criterio == 'completo':
+        return _preenchidos(novo) > _preenchidos(atual)   # empate: fica o primeiro
+    if criterio == 'recente':
+        return _data_iso(novo) >= _data_iso(atual)        # empate: o último processado
+    return False                                          # 'primeira'
+
+
+def dedup(linhas, campos, criterio=CRITERIO_PADRAO):
+    """Um registro por chave `campos`. `criterio` decide qual fica quando a
+    chave se repete: 'primeira' ocorrência (padrão), 'completo' (mais campos
+    preenchidos) ou 'recente' (maior data; empate: o último processado).
+    A ordem de saída é a ordem em que cada chave apareceu pela 1ª vez."""
+    if criterio not in CRITERIOS_DEDUP:
+        raise ValueError(f"criterio deve ser um de {CRITERIOS_DEDUP}: {criterio!r}")
+    escolhidos, ordem = {}, []
     for r in linhas:
         chave = tuple(r.get(c, '') for c in campos)
-        if chave not in vistos:
-            vistos.add(chave)
-            unicos.append(r)
-    return unicos
+        if chave not in escolhidos:
+            escolhidos[chave] = r
+            ordem.append(chave)
+        elif _prefere_o_novo(criterio, r, escolhidos[chave]):
+            escolhidos[chave] = r
+    return [escolhidos[chave] for chave in ordem]
 
 
 def _texto_com_paragrafos_ou_none(caminho: str):
@@ -41,7 +83,17 @@ def _texto_com_paragrafos_ou_none(caminho: str):
     try:
         return pdf_text.texto_com_paragrafos(caminho)
     except Exception:  # noqa: BLE001
+        log.warning('parágrafos indisponíveis para %s; usando texto achatado',
+                    caminho, exc_info=True)
         return None
+
+
+def _sha256(caminho: str) -> str:
+    resumo = hashlib.sha256()
+    with open(caminho, 'rb') as fh:
+        for bloco in iter(lambda: fh.read(1 << 20), b''):
+            resumo.update(bloco)
+    return resumo.hexdigest()
 
 
 def processar_arquivo(lote: Lote, caminho: str, nome: str,
@@ -63,26 +115,40 @@ def processar_arquivo(lote: Lote, caminho: str, nome: str,
         if tipo == 'consulta':
             regs = p_consultas.parse(pdf_text.texto_simples(caminho),
                                      _texto_com_paragrafos_ou_none(caminho))
+            sha = _sha256(caminho)
             lote.consultas.extend(regs)
             linha['Consultas'] = len(regs)
+            for r in regs:
+                lote.origem.setdefault(
+                    ('consulta', r.get('Ano', ''), r.get('Nº da Consulta', '')), nome)
+            lote.importacoes.append({'arquivo': nome, 'sha256': sha,
+                                     'tipo': tipo, 'n_registros': len(regs)})
         elif tipo == 'regime':
             regs, desc = p_regimes.parse(pdf_text.texto_por_colunas(caminho))
             for d in desc:
                 d['Arquivo'] = nome
+            sha = _sha256(caminho)
             lote.regimes.extend(regs)
             lote.descartes.extend(desc)
             linha['Regimes'] = len(regs)
             linha['Descartes'] = len(desc)
+            for r in regs:
+                lote.origem.setdefault(
+                    ('regime', r.get('Nº DO REGIME ESPECIAL', ''),
+                     r.get('CNPJ REQUERENTE', '')), nome)
+            lote.importacoes.append({'arquivo': nome, 'sha256': sha,
+                                     'tipo': tipo, 'n_registros': len(regs)})
         linha['Tipo'] = tipo
     except Exception as erro:  # noqa: BLE001 — um PDF ruim não pode matar o lote
+        log.error('falha ao processar %s', nome, exc_info=True)
         linha['Tipo'] = 'erro'
         linha['Erro'] = f"{type(erro).__name__}: {erro}"
     lote.arquivos.append(linha)
     return linha
 
 
-def finalizar(lote: Lote) -> Lote:
+def finalizar(lote: Lote, criterio: str = CRITERIO_PADRAO) -> Lote:
     """Deduplica consultas e regimes do lote (no lugar) e o devolve."""
-    lote.consultas = dedup(lote.consultas, CHAVE_CONSULTAS)
-    lote.regimes = dedup(lote.regimes, CHAVE_REGIMES)
+    lote.consultas = dedup(lote.consultas, CHAVE_CONSULTAS, criterio)
+    lote.regimes = dedup(lote.regimes, CHAVE_REGIMES, criterio)
     return lote

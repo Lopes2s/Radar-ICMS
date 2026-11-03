@@ -14,12 +14,18 @@ garantir_dependencias(DEPS_APP)
 
 import streamlit as st  # noqa: E402
 
-from core import acesso, armazenamento, consulta, pipeline, planilha  # noqa: E402
+from core import acesso, armazenamento, consulta, log, planilha  # noqa: E402
+from core.execucao import Execucao  # noqa: E402
 from core.pdf_text import MARCA_CITACAO  # noqa: E402
+
+log.configurar_log(armazenamento.pasta_dados())
 
 _FORCAR = {"Detectar automaticamente": None,
            "Forçar Consulta": "consulta",
            "Forçar Regime": "regime"}
+_CRITERIOS = {"Primeira ocorrência": "primeira",
+              "Mais completo": "completo",
+              "Mais recente": "recente"}
 
 # MAPEADOR_BANCO permite apontar para um banco de teste/alternativo; sem a
 # variável, cai no padrão de armazenamento.conectar() (mapeamento.db na raiz
@@ -185,10 +191,10 @@ with st.sidebar:
     st.divider()
 
 
-def _conexao():
-    conn = armazenamento.conectar(_CAMINHO_BANCO)
-    armazenamento.criar_esquema(conn)
-    return conn
+def _persistir(lote):
+    """Grava o lote no banco e devolve o resumo de novos/atualizados."""
+    with armazenamento.sessao(_CAMINHO_BANCO) as conn:
+        return armazenamento.persistir_lote(conn, lote)
 
 
 def _titulo_do_registro(tipo: str, registro: dict) -> str:
@@ -253,7 +259,7 @@ def _resposta_em_paragrafos(texto: str) -> str:
 
 
 @st.dialog("Detalhes", width="large", on_dismiss=_fecha_selecao_da_tabela)
-def _mostra_detalhe(tipo: str, registro: dict, colunas: list):
+def _mostra_detalhe(tipo: str, registro: dict, colunas: list, historico=()):
     st.subheader(_titulo_do_registro(tipo, registro))
     for campo in colunas:
         valor = registro.get(campo, "")
@@ -267,27 +273,46 @@ def _mostra_detalhe(tipo: str, registro: dict, colunas: list):
             st.markdown(_resposta_em_paragrafos(valor), unsafe_allow_html=True)
         else:
             st.write(valor)
+    if historico:
+        with st.expander(f"Histórico de alterações ({len(historico)})"):
+            for h in historico:
+                st.markdown(f"**{h['alterado_em']}** (versão {h['versao_app']}) — "
+                            f"campos alterados: {', '.join(h['campos_alterados'])}")
 
 
-def _processar(enviados, forcar):
-    """Processa os uploads, persiste no banco e devolve o resultado a
-    guardar na sessão."""
+def _analisar(enviados, forcar, criterio):
+    """Lê os PDFs e diagnostica, SEM gravar. Devolve o que a sessão guarda
+    até o usuário decidir gravar."""
     acesso.exige_admin(st.session_state.get("perfil"))
-    lote = pipeline.Lote()
-    barra = st.progress(0.0, text="Processando...")
-    for i, arq in enumerate(enviados):
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-            tmp.write(arq.getbuffer())
-            caminho = tmp.name
-        try:
-            pipeline.processar_arquivo(lote, caminho, arq.name, forcar=forcar)
-        finally:
-            os.unlink(caminho)
-        barra.progress((i + 1) / len(enviados), text=f"Processado: {arq.name}")
-    barra.empty()
-    pipeline.finalizar(lote)
+    barra = st.progress(0.0, text="Lendo os PDFs...")
 
-    mapeamento = armazenamento.persistir_lote(_conexao(), lote)
+    def progresso(fase, atual, total, texto):
+        barra.progress(atual / (total or 1),
+                       text=f"Lendo: {texto}" if texto else "Lendo os PDFs...")
+
+    temporarios = []
+    try:
+        pares = []
+        for arq in sorted(enviados, key=lambda a: a.name):
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                temporarios.append(tmp.name)
+                tmp.write(arq.getbuffer())
+            pares.append((tmp.name, arq.name))
+        execucao = Execucao(progresso=progresso, dedup=criterio)
+        lote = execucao.carregar(pares, forcar=forcar)
+    finally:
+        for caminho in temporarios:
+            os.unlink(caminho)
+        barra.empty()
+    return {"lote": lote, "diagnostico": execucao.diagnostico}
+
+
+def _gravar(analise):
+    """Persiste o lote analisado e devolve o resultado a guardar na sessão
+    (mesmas chaves de sempre)."""
+    acesso.exige_admin(st.session_state.get("perfil"))
+    lote = analise["lote"]
+    mapeamento = _persistir(lote)
 
     # planilha em memória, exportação opcional: nada de cópia em disco
     buf = io.BytesIO()
@@ -296,6 +321,26 @@ def _processar(enviados, forcar):
     return {"arquivos": lote.arquivos, "consultas": lote.consultas,
             "regimes": lote.regimes, "descartes": lote.descartes,
             "mapeamento": mapeamento, "xlsx": buf.getvalue()}
+
+
+def _mostra_analise(analise):
+    lote, diag = analise["lote"], analise["diagnostico"]
+    with st.container(border=True, key="card-analise"):
+        st.subheader("Análise dos arquivos (nada foi gravado ainda)")
+        st.dataframe(lote.arquivos, width="stretch", hide_index=True)
+        for linha in lote.arquivos:
+            if linha["Tipo"] == "erro":
+                st.error(f"**{linha['Arquivo']}** não pôde ser lido: {linha['Erro']}")
+        c1, c2 = st.columns(2)
+        c1.metric("Consultas", len(lote.consultas))
+        c2.metric("Regimes", len(lote.regimes))
+        for m in diag["mensagens"]:
+            if m["codigo"] == "E001":
+                continue  # o erro do arquivo já foi mostrado acima, com o motivo
+            aviso = f"**{m['codigo']} — {m['titulo']}.** {m['texto']}"
+            (st.warning if m["nivel"] == "aviso" else st.error)(aviso)
+        if not diag["pode_continuar"]:
+            st.info("Não há nenhum registro para gravar.")
 
 
 def _tela_inicial():
@@ -335,9 +380,16 @@ if perfil not in (acesso.PERFIL_CONSULTA, acesso.PERFIL_ADMIN):
     _tela_inicial()
     st.stop()
 
+try:
+    with armazenamento.sessao(_CAMINHO_BANCO):
+        pass
+except armazenamento.SchemaMaisNovo as erro:
+    st.error(str(erro))
+    st.stop()
+
 with st.sidebar:
     if st.button("Trocar perfil", key="trocar-perfil"):
-        for chave in ("perfil", "resultado"):
+        for chave in ("perfil", "resultado", "analise"):
             st.session_state.pop(chave, None)
         st.rerun()
 
@@ -353,8 +405,8 @@ if aba_processar is not None:
           st.header("Como funciona")
           st.markdown(
               "1. Envie os PDFs (consultas SEFA e/ou páginas do Diário).\n"
-              "2. A ferramenta detecta o tipo, extrai os campos e mapeia no "
-              "banco local.\n"
+              "2. A ferramenta detecta o tipo, extrai os campos e mostra uma "
+              "análise para você conferir; só então grava no banco local.\n"
               "3. Use a aba **Consultar** para buscar o que já foi mapeado, "
               "ou baixe a planilha desta sessão se quiser.\n\n"
               "Reprocessar o mesmo PDF atualiza o que já estava mapeado, "
@@ -369,23 +421,44 @@ if aba_processar is not None:
       arquivos = st.file_uploader("Arraste os PDFs aqui", type=["pdf"],
                                   accept_multiple_files=True)
 
-      if arquivos and st.button("▶️ Processar", type="primary"):
-          st.session_state["resultado"] = _processar(arquivos, _FORCAR[escolha])
+      criterio = st.selectbox(
+          "Se o mesmo ato aparecer em mais de um arquivo", list(_CRITERIOS),
+          help="Primeira ocorrência: a do primeiro arquivo (ordem alfabética). "
+               "Mais completo: o registro com mais campos preenchidos. "
+               "Mais recente: o de maior data de publicação.",
+      )
 
-      # Exibido a partir da sessão, e não de dentro do `if st.button`: assim o
-      # resultado continua na tela depois de qualquer reexecução do script
-      # (por exemplo, o clique em "Baixar").
+      if arquivos and st.button("🔍 Analisar", type="primary", key="analisar"):
+          st.session_state.pop("resultado", None)
+          st.session_state["analise"] = _analisar(arquivos, _FORCAR[escolha],
+                                                  _CRITERIOS[criterio])
+          st.session_state["analise"]["nomes"] = tuple(a.name for a in arquivos)
+
+      # Exibidos a partir da sessão, e não de dentro do `if st.button`: assim a
+      # análise/o resultado continuam na tela depois de qualquer reexecução do
+      # script (por exemplo, o clique em "Baixar").
+      analise = st.session_state.get("analise")
+      if analise and "nomes" in analise and (
+              tuple(a.name for a in arquivos) != analise["nomes"]):
+          st.session_state.pop("analise", None)
+          analise = None
       resultado = st.session_state.get("resultado")
-      if resultado:
+      if analise:
+          _mostra_analise(analise)
+          if st.button("💾 Gravar no banco", type="primary", key="gravar",
+                       disabled=not analise["diagnostico"]["pode_continuar"]):
+              st.session_state["resultado"] = _gravar(analise)
+              st.session_state.pop("analise", None)
+              st.rerun()
+      elif resultado:
           # bloco inteiro num card branco — manual: "blocos de informação em
           # cards brancos, cantos arredondados, leve elevação"
           with st.container(border=True, key="card-resumo"):
               st.subheader("Resumo do processamento")
               st.dataframe(resultado["arquivos"], width="stretch", hide_index=True)
               erros = [a for a in resultado["arquivos"] if a["Tipo"] == "erro"]
-              if erros:
-                  st.warning(f"{len(erros)} arquivo(s) não puderam ser lidos — veja a "
-                             "coluna Erro acima.")
+              for e in erros:
+                  st.error(f"**{e['Arquivo']}** não pôde ser lido: {e['Erro']}")
 
               c1, c2, c3 = st.columns(3)
               c1.metric("Consultas", len(resultado["consultas"]))
@@ -414,11 +487,10 @@ if aba_processar is not None:
                   on_click="ignore",
               )
       else:
-          st.info("Envie um ou mais PDFs e clique em **Processar**.")
+          st.info("Envie um ou mais PDFs e clique em **Analisar**.")
 
-with aba_consultar:
-    conn = _conexao()
 
+def _renderiza_consultar(conn):
     # Painel de busca no estilo da tela de referência (busca de normas):
     # os mesmos 3 filtros de sempre (tipo/texto/ano), só reorganizados lado
     # a lado num card com rótulos em destaque — nenhum campo novo, nenhuma
@@ -433,8 +505,8 @@ with aba_consultar:
             anos = consulta.anos_disponiveis(conn, tipo)
             ano = st.selectbox("Ano do ato", ["Todos"] + anos)
 
-    resultados = consulta.buscar(conn, tipo, texto=texto or None,
-                                 ano=None if ano == "Todos" else ano)
+    ano_filtro = None if ano == "Todos" else ano
+    resultados = consulta.buscar_lista(conn, tipo, texto=texto or None, ano=ano_filtro)
 
     with st.container(border=True, key="card-consultar"):
         st.markdown('<div class="icms-resultado-barra">RESULTADO DA PESQUISA</div>',
@@ -451,13 +523,22 @@ with aba_consultar:
         linhas_selecionadas = st.session_state["tabela-resultados"]["selection"]["rows"]
         if linhas_selecionadas:
             cols_do_tipo = planilha.COLS_CONSULTAS if tipo == "consulta" else planilha.COLS_REGIMES
-            _mostra_detalhe(tipo, resultados[linhas_selecionadas[0]], cols_do_tipo)
+            completo = consulta.detalhe(conn, tipo, resultados[linhas_selecionadas[0]])
+            if completo is not None:
+                _mostra_detalhe(tipo, completo, cols_do_tipo,
+                                consulta.historico(conn, tipo, completo))
 
         if resultados:
             st.download_button(
                 "⬇️ Baixar estes resultados (.xlsx)",
-                consulta.exportar_xlsx(tipo, resultados),
+                lambda: consulta.exportar_busca(tipo, texto or None, ano_filtro,
+                                                _CAMINHO_BANCO),
                 file_name=f"{tipo}s_filtrados.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 on_click="ignore",
             )
+
+
+with aba_consultar:
+    with armazenamento.sessao(_CAMINHO_BANCO) as conn:
+        _renderiza_consultar(conn)

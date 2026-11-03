@@ -357,3 +357,110 @@ def test_citacao_legal_ganha_recuo_e_o_marcador_invisivel_nunca_aparece():
             'style="margin-left:2.5rem">'
             '&quot;Art. 31. Citado &lt;b&gt;.&quot;</p>') in campo
     assert campo.count('style="margin-left') == 1   # só a citação, não o fisco
+
+
+def test_banco_de_versao_mais_nova_mostra_erro_amigavel():
+    conn = armazenamento.conectar(os.environ["MAPEADOR_BANCO"])
+    conn.execute(f"PRAGMA user_version = {armazenamento.SCHEMA_VERSAO + 1}")
+    conn.commit()
+    conn.close()
+
+    at = _app().run(timeout=30)
+
+    assert not at.exception
+    assert any("mais nova" in e.value for e in at.error)
+
+
+def test_renderizar_a_aba_nao_gera_o_xlsx(monkeypatch):
+    # a planilha só pode ser montada quando o usuário clica em "Baixar"
+    conn = armazenamento.conectar(os.environ["MAPEADOR_BANCO"])
+    armazenamento.criar_esquema(conn)
+    armazenamento.salvar_consultas(conn, [
+        {'Ano': '2026', 'Nº da Consulta': '001', 'Súmula': 'ICMS'},
+    ])
+    conn.close()
+
+    def _nao_deve_rodar(*args, **kwargs):
+        raise AssertionError("xlsx gerado sem clique")
+
+    monkeypatch.setattr("core.consulta.exportar_xlsx", _nao_deve_rodar)
+
+    at = _app().run(timeout=30)
+
+    assert not at.exception
+
+
+def _lote_com_uma_consulta():
+    from core import pipeline
+    return pipeline.Lote(
+        consultas=[{'Ano': '2026', 'Nº da Consulta': '001',
+                    'Data da Publicação': '2026-01-19', 'Protocolo': '',
+                    'Súmula': 'ICMS', 'Problema da Consulta': 'a',
+                    'CNAE Detectado': '', 'Resposta': 'r'}],
+        arquivos=[{'Arquivo': 'c.pdf', 'Tipo': 'consulta', 'Consultas': 1,
+                   'Regimes': 0, 'Descartes': 0, 'Erro': ''}])
+
+
+def _com_analise(lote):
+    from core import diagnostico
+    at = _app()
+    at.session_state["analise"] = {"lote": lote,
+                                   "diagnostico": diagnostico.diagnosticar(lote)}
+    return at
+
+
+def test_analise_guardada_mostra_o_diagnostico_e_nao_grava_ainda():
+    at = _com_analise(_lote_com_uma_consulta()).run(timeout=30)
+
+    assert not at.exception
+    assert any("nada foi gravado" in s.value for s in at.subheader)
+    conn = armazenamento.conectar(os.environ["MAPEADOR_BANCO"])
+    armazenamento.criar_esquema(conn)
+    assert armazenamento.buscar_consultas(conn) == []
+
+
+def test_clicar_em_gravar_persiste_e_mostra_o_resultado():
+    at = _com_analise(_lote_com_uma_consulta()).run(timeout=30)
+
+    at.button(key="gravar").click().run(timeout=30)
+
+    assert not at.exception
+    conn = armazenamento.conectar(os.environ["MAPEADOR_BANCO"])
+    assert len(armazenamento.buscar_consultas(conn)) == 1
+    assert "analise" not in at.session_state
+    assert at.session_state["resultado"]["mapeamento"]["consultas"]["novos"] == 1
+
+
+def test_analise_nomeia_o_arquivo_com_erro_e_ainda_deixa_gravar_os_bons():
+    lote = _lote_com_uma_consulta()
+    lote.arquivos.append({'Arquivo': 'ruim.pdf', 'Tipo': 'erro', 'Consultas': 0,
+                          'Regimes': 0, 'Descartes': 0,
+                          'Erro': 'PDFSyntaxError: arquivo inválido'})
+
+    at = _com_analise(lote).run(timeout=30)
+
+    assert any("ruim.pdf" in e.value and "PDFSyntaxError" in e.value for e in at.error)
+    assert at.button(key="gravar").disabled is False
+
+
+def test_gravar_fica_desabilitado_quando_nao_ha_registros():
+    from core import pipeline
+    lote = pipeline.Lote(arquivos=[{'Arquivo': 'x.pdf', 'Tipo': 'desconhecido',
+                                    'Consultas': 0, 'Regimes': 0,
+                                    'Descartes': 0, 'Erro': ''}])
+    at = _com_analise(lote).run(timeout=30)
+    assert at.button(key="gravar").disabled is True
+
+
+def test_trocar_perfil_descarta_a_analise_pendente():
+    at = _com_analise(_lote_com_uma_consulta()).run(timeout=30)
+    at.button(key="trocar-perfil").click().run(timeout=30)
+    assert "analise" not in at.session_state
+
+
+def test_analise_de_outros_arquivos_e_descartada():
+    at = _com_analise(_lote_com_uma_consulta())
+    at.session_state["analise"]["nomes"] = ("outro.pdf",)
+    at.run(timeout=30)
+    assert "analise" not in at.session_state
+    assert not any(b.key == "gravar" for b in at.button)
