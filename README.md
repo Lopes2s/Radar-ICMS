@@ -4,7 +4,7 @@ Ferramenta local que lê PDFs da SEFA-PR (consultas tributárias) e do Diário
 Oficial (regimes especiais), extrai os campos objetivos, mapeia tudo num banco
 SQLite e permite consultar o que foi mapeado por uma interface web (Streamlit).
 
-Versão atual: **0.7.0** (histórico em [`CHANGELOG.md`](CHANGELOG.md)).
+Versão atual: **0.8.0** (histórico em [`CHANGELOG.md`](CHANGELOG.md)).
 
 ## Sumário
 1. [O que a ferramenta faz](#1-o-que-a-ferramenta-faz)
@@ -142,11 +142,23 @@ Códigos do diagnóstico:
   banco ainda vazio).
 - **Baixar estes resultados (.xlsx)** gera a planilha só quando você clica.
 
+### Edição manual (Administrador)
+O administrador corrige consultas e regimes em dois momentos:
+
+- **Depois de gravado**: na aba Consultar, abra o detalhe do ato e use **Editar**. Todos os campos são editáveis, inclusive a chave (número e CNPJ do regime; ano e número da consulta). Se a chave nova já pertencer a outro ato, a edição é recusada e nada muda.
+- **Na análise, antes de gravar**: em *Ajustar um ato antes de gravar*, escolha o ato apontado nos avisos e corrija os campos. O diagnóstico é refeito na hora e nada vai ao banco até **Gravar**.
+
+Cada edição guarda a versão anterior no histórico do ato (origem *ajuste manual*) e marca os campos editados como **ajustados**. Ao reimportar o PDF:
+
+- os campos ajustados **não são sobrescritos** — a análise lista os atos em conflito e você marca *Sobrescrever com o PDF* só nos que quiser (por padrão, nenhum);
+- se a chave foi corrigida, o PDF original **cai no ato corrigido** em vez de criar um duplicado.
+
 ## 4. Linha de comando
 
 ```bash
 python processar.py <pasta_com_pdfs> [--banco arquivo.db] [--xlsx saida.xlsx]
                     [--dedup primeira|completo|recente] [--simular]
+                    [--sobrescrever-ajustes]
 ```
 
 | Opção | Efeito |
@@ -155,6 +167,7 @@ python processar.py <pasta_com_pdfs> [--banco arquivo.db] [--xlsx saida.xlsx]
 | `--xlsx` | grava também uma planilha (sem ela, nenhuma planilha é gerada) |
 | `--dedup` | critério para o mesmo ato em mais de um arquivo (padrão: `primeira`) |
 | `--simular` | lê e diagnostica os PDFs **sem gravar nada** |
+| `--sobrescrever-ajustes` | o valor do PDF vence também nos campos que o administrador ajustou à mão (por padrão o ajuste é mantido e a CLI avisa) |
 
 A pasta é a primeira informação da linha de comando. Os PDFs são processados em
 ordem alfabética.
@@ -197,7 +210,7 @@ PDF.
   quantidade de atos, data e versão do app).
 
 ### Versão do schema
-O banco guarda a versão do schema em `PRAGMA user_version` (atual: 2). Bancos
+O banco guarda a versão do schema em `PRAGMA user_version` (atual: 3). Bancos
 antigos são atualizados sem perder dados (só se acrescentam tabelas/colunas). Um
 banco criado por uma versão **mais nova** é recusado, sem nenhuma alteração, com
 uma mensagem pedindo para atualizar a ferramenta.
@@ -292,7 +305,7 @@ pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-A suíte tem 297 testes e leva cerca de um minuto. Os testes usam uma pasta de
+A suíte tem 357 testes e leva cerca de um minuto. Os testes usam uma pasta de
 dados temporária (`tests/conftest.py`), nunca o banco real do projeto.
 
 ## 10. Distribuição

@@ -1,5 +1,12 @@
 # Histórico de versões
 
+## 0.8.0
+- **Edição manual** pelo administrador, de consultas e regimes: no detalhe do ato (aba Consultar) e na análise, antes de gravar. Todos os campos podem ser editados, inclusive a chave (número e CNPJ).
+- Corrigir a chave não duplica o ato: a chave antiga vira apelido, então reimportar o PDF original cai no ato corrigido.
+- Campos ajustados à mão **não são sobrescritos** pela reimportação. A análise lista os atos em conflito e o administrador marca quais sobrescrever com o PDF; na CLI, `--sobrescrever-ajustes`.
+- O histórico do ato diz se a alteração veio de **importação** ou de **ajuste manual**.
+- Schema 3 (`ajustes`, `chaves_substituidas` e `origem` no histórico); bancos do schema 2 migram sozinhos.
+
 ## 0.7.0
 - Interface em duas etapas: **Analisar** (diagnóstico, nada é gravado) e **Gravar**.
 - Critério para o mesmo ato em vários arquivos: primeira ocorrência (padrão), mais completo ou mais recente (interface e `--dedup`).
