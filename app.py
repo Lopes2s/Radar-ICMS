@@ -169,7 +169,8 @@ def _avisar_receita(resumo):
 
 def _consultar_cnpj(cnpj_do_regime: str):
     """Consulta (ou refaz a consulta de) um CNPJ pelo detalhe do regime. Roda no
-    on_click do botão: o toast sai na reexecução seguinte e o detalhe continua aberto."""
+    on_click do botão: fecha o detalhe (como a edição e o aplicar CNAE), o toast sai na
+    reexecução seguinte e os dados novos aparecem ao reabrir a linha."""
     acesso.exige_admin(st.session_state.get("perfil"))
     with armazenamento.sessao(_CAMINHO_BANCO) as conn:
         resumo = cnpj.atualizar(conn, [cnpj_do_regime], forcar=True)
@@ -179,6 +180,7 @@ def _consultar_cnpj(cnpj_do_regime: str):
         st.session_state["aviso"] = f"Receita Federal: {resumo['falhas'][0][1]}."
     else:
         st.session_state["aviso"] = "Receita Federal: CNPJ em branco ou inválido, nada a consultar."
+    _fecha_selecao_da_tabela()
 
 
 def _aplicar_cnae(registro: dict, receita: dict):

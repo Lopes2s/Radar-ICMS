@@ -868,6 +868,7 @@ def test_admin_consulta_o_cnpj_pelo_detalhe(monkeypatch):
     assert not at.exception
     assert rede.urls == [f'https://brasilapi.com.br/api/cnpj/v1/{CNPJ_DO_REGIME}']
     assert any("CNPJ consultado" in t.value for t in at.toast)
+    assert at.session_state["tabela-resultados"]["selection"]["rows"] == []   # detalhe fechado
     _linha_0(at)
     at.run(timeout=30)
     assert "6422-1/00" in " ".join(_textos(at))
@@ -883,6 +884,7 @@ def test_consulta_pelo_detalhe_mostra_o_motivo_quando_a_rede_falha(monkeypatch):
     at.button(key="consultar-cnpj").click().run(timeout=30)
     assert not at.exception
     assert any("sem acesso à BrasilAPI" in t.value for t in at.toast)
+    assert at.session_state["tabela-resultados"]["selection"]["rows"] == []   # detalhe fechado
 
 
 def test_admin_aplica_o_cnae_da_receita_ao_regime():
