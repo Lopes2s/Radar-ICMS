@@ -1,199 +1,296 @@
 # Mapeador de Consultas e Regimes Especiais — PR
 
-Lê PDFs da SEFA-PR (consultas tributárias) e do Diário Oficial (regimes
-especiais), extrai os campos objetivos e mapeia tudo num banco local
-(`mapeamento.db`), consultável depois por uma interface Streamlit (busca
-livre, por ano, por tipo). A planilha `.xlsx` continua disponível, mas como
-exportação opcional — não é mais o produto final da ferramenta.
+Ferramenta local que lê PDFs da SEFA-PR (consultas tributárias) e do Diário
+Oficial (regimes especiais), extrai os campos objetivos, mapeia tudo num banco
+SQLite e permite consultar o que foi mapeado por uma interface web (Streamlit).
 
-## Instalação
-Requer Python 3.10+. A instalação manual é opcional:
+Versão atual: **0.7.0** (histórico em [`CHANGELOG.md`](CHANGELOG.md)).
 
-    pip install -r requirements.txt
+## Sumário
+1. [O que a ferramenta faz](#1-o-que-a-ferramenta-faz)
+2. [Início rápido](#2-início-rápido)
+3. [Interface](#3-interface)
+4. [Linha de comando](#4-linha-de-comando)
+5. [Dados, banco e histórico](#5-dados-banco-e-histórico)
+6. [O que é extraído](#6-o-que-é-extraído)
+7. [Arquitetura](#7-arquitetura)
+8. [Dependências e bootstrap](#8-dependências-e-bootstrap)
+9. [Testes](#9-testes)
+10. [Distribuição](#10-distribuição)
+11. [Limitações conhecidas](#11-limitações-conhecidas)
+12. [Desenvolvimento futuro](#12-desenvolvimento-futuro)
 
-As dependências que faltarem são instaladas sozinhas no primeiro arranque
-(veja *Bootstrap de dependências*).
+---
 
-## Uso (interface)
-Clique duas vezes em **`Mapeador.bat`**. Ele prepara o ambiente e abre a
-interface no navegador. A janela preta que aparece é o servidor: mantenha-a
-aberta enquanto usar a ferramenta e feche-a para encerrar.
+## 1. O que a ferramenta faz
+- **Importa** PDFs de consultas e de regimes especiais (detecta o tipo pelo
+  conteúdo; é possível forçar o tipo na interface).
+- **Analisa antes de gravar**: mostra, por arquivo, erros de leitura, CNPJ
+  inválido, campos vazios e datas fora do padrão, sem alterar o banco.
+- **Mapeia** os atos num banco SQLite local, sem duplicar: reimportar atualiza o
+  registro e guarda a versão anterior num histórico.
+- **Consulta** o banco por tipo, ano e texto livre (sem diferenciar acentos nem
+  maiúsculas), com o detalhe completo de cada ato.
+- **Exporta** para `.xlsx` (planilha da sessão de importação ou resultados da
+  busca atual) — exportação opcional, o produto é o banco.
 
-Pelo terminal, o equivalente é:
+## 2. Início rápido
+Requer **Python 3.10+** e Windows para o atalho `.bat`.
 
-    python iniciar.py
+1. Clique duas vezes em **`Mapeador.bat`**. Na primeira execução ele cria um
+   ambiente isolado (`.venv`, precisa de internet nessa vez), instala as
+   dependências que faltarem e abre a interface no navegador.
+2. A janela preta que aparece é o servidor: mantenha-a aberta enquanto usar a
+   ferramenta e feche-a para encerrar.
+3. Para o perfil **Administrador** (importar PDFs), crie a senha — ver
+   [Perfis e senha](#perfis-e-senha-do-administrador).
 
-O servidor escuta apenas em `127.0.0.1` — a ferramenta não fica exposta na rede
-do escritório — e a telemetria do streamlit fica desligada. Se a porta 8501
-estiver ocupada, a próxima livre é usada automaticamente.
+Pelo terminal, o equivalente é `python iniciar.py`. O servidor escuta apenas em
+`127.0.0.1` (a ferramenta não fica exposta na rede do escritório), a telemetria
+do Streamlit fica desligada e, se a porta 8501 estiver ocupada, a próxima livre
+é usada.
 
-Ao abrir, a interface mostra a **tela inicial** com dois perfis: **Consulta**
-(entra direto; só a aba "🔎 Consultar") e **Administrador** (exige senha; abre
-também a aba "📥 Processar e mapear", onde se importam PDFs). Na barra lateral
-há o botão **Trocar perfil**, que volta à tela inicial. Atualizar a página
-(F5) também volta à tela inicial, pois o perfil vive só na sessão.
+Instalação manual das dependências (opcional):
 
-## Perfis e senha do Administrador
+```bash
+pip install -r requirements.txt
+```
+
+## 3. Interface
+Ao abrir, a **tela inicial** pede o perfil. O botão **Trocar perfil**, na barra
+lateral, volta a ela; atualizar a página (F5) também, pois o perfil vive só na
+sessão.
+
+| Perfil | Acesso | Abas |
+|---|---|---|
+| **Consulta** | direto, sem senha | 🔎 Consultar |
+| **Administrador** | exige senha | 📥 Processar e mapear + 🔎 Consultar |
+
+### Perfis e senha do Administrador
 A senha fica em `.streamlit/secrets.toml`, que não é versionado e precisa ser
-criado em cada máquina onde a ferramenta for usada. Crie o arquivo com este
-conteúdo, trocando a senha:
+criado em cada máquina onde a ferramenta for usada:
 
-    [admin]
-    senha = "troque-esta-senha"
+```toml
+[admin]
+senha = "troque-esta-senha"
+```
 
 Sem o arquivo (ou com a seção/chave ausente, vazia ou que não seja texto), o
 perfil Administrador fica **desabilitado** — nunca cai em acesso aberto; o
 perfil Consulta continua funcionando. A lógica está em `core/acesso.py`.
 
-Limites, a rever na hospedagem multiusuário:
-- a senha é texto puro no disco: protege contra uso acidental da interface,
-  não contra quem tem acesso ao arquivo;
-- `processar.py` (CLI) não tem restrição de perfil;
+Limites conhecidos:
+- a senha é texto puro no disco: protege contra uso acidental da interface, não
+  contra quem tem acesso ao arquivo;
+- a CLI (`processar.py`) não tem restrição de perfil;
 - não há bloqueio por tentativas erradas de senha.
 
-## Uso (linha de comando)
+### Aba "Processar e mapear" (Administrador)
+1. Envie os PDFs. Na barra lateral, **Tipo do PDF** permite *detectar
+   automaticamente* ou forçar *Consulta* / *Regime*.
+2. Escolha o critério para **o mesmo ato aparecer em mais de um arquivo**:
+   *Primeira ocorrência* (padrão; a do primeiro arquivo, em ordem alfabética),
+   *Mais completo* (o registro com mais campos preenchidos) ou *Mais recente*
+   (a maior data de publicação; empate: o último processado).
+3. **🔍 Analisar** lê os PDFs e mostra o diagnóstico. **Nada é gravado ainda.**
+   Cada arquivo com erro aparece com o nome e o motivo, e não impede os demais.
+   Se os arquivos enviados mudarem depois da análise, ela é descartada.
+4. **💾 Gravar no banco** (habilitado quando há ao menos um registro) persiste o
+   lote e mostra o resumo: quantos atos são novos e quantos foram atualizados.
+   Daí é possível baixar a planilha da sessão.
 
-    python processar.py <pasta_com_pdfs> [--banco arquivo.db] [--xlsx saida.xlsx]
-                        [--dedup primeira|completo|recente] [--simular]
+Códigos do diagnóstico:
 
-`--simular` lê e diagnostica os PDFs sem gravar nada. `--dedup` escolhe qual
-registro fica quando o mesmo ato aparece em mais de um arquivo (padrão:
-`primeira`). Códigos de saída: 0 = tudo certo; 1 = uso incorreto, nenhum PDF,
-planilha aberta no Excel ou banco de versão mais nova; 2 = algum PDF falhou
-(os demais foram gravados) — cada erro é listado, por arquivo, em stderr.
+| Código | Nível | Significado |
+|---|---|---|
+| `E001` | erro | arquivo ilegível (mostra o motivo; não bloqueia a gravação dos demais) |
+| `A001` | aviso | tipo de arquivo não identificado |
+| `A201` / `A202` / `A203` | aviso | consulta sem resposta / sem súmula / data fora de AAAA-MM-DD |
+| `A301` / `A302` | aviso | regime sem CNPJ do requerente / CNPJ inválido (dígitos verificadores) |
+| `A303` / `A304` | aviso | regime sem vigência / data fora de AAAA-MM-DD |
+| `A401` | aviso | nenhum registro extraído (bloqueia a gravação) |
 
-Sem `--banco`, usa `MAPEADOR_BANCO` se definido; senão `mapeamento.db` na pasta de dados (`MAPEADOR_DADOS`, padrão: a raiz do projeto). Reprocessar a mesma
-pasta não duplica: cada consulta/regime já mapeado é atualizado (upsert pela
-chave natural), não repetido. `--xlsx` é totalmente opcional — sem ele,
-nenhuma planilha é gerada.
+### Aba "Consultar"
+- Filtros: **tipo de ato**, **busca textual** e **ano**. A busca ignora acentos e
+  maiúsculas e trata `%` e `_` como texto comum.
+  - Consultas: nº da consulta, súmula, problema, CNAE e resposta.
+  - Regimes: nº do regime, empresa, CNPJ, ementa e benefícios/procedimentos.
+- A tabela mostra só colunas curtas. **Selecione uma linha** para abrir o
+  detalhe completo (campo a campo) e, se houver, o **histórico de alterações**.
+- **⬇️ Baixar estes resultados (.xlsx)** gera a planilha só quando você clica.
 
-## Mapeamento e consulta (banco local)
-Cada PDF processado (pela CLI ou pela interface) é mapeado num banco SQLite
-local — `mapeamento.db` por padrão, na raiz do projeto. Não é dependência
-nova: `sqlite3` é da biblioteca padrão do Python.
+## 4. Linha de comando
 
-- A chave de cada tabela é a mesma chave natural que já evita duplicata
-  dentro de um lote (`core/pipeline.CHAVE_CONSULTAS`/`CHAVE_REGIMES`):
-  Ano + Nº da Consulta, e Nº do Regime Especial + CNPJ requerente.
-- Reprocessar um PDF já mapeado **atualiza** o registro, não duplica — útil
-  quando o parser é corrigido depois (já aconteceu mais de uma vez).
-- O arquivo `mapeamento.db` não é versionado (está no `.gitignore`, como o
-  `.xlsx` já estava). Trocar de máquina sem copiar esse arquivo perde o
-  mapeamento acumulado.
-- Na interface (`app.py`), a variável de ambiente `MAPEADOR_BANCO` aponta
-  para um banco alternativo (usada pelos testes; sem ela, usa o padrão).
-- A aba **Consultar** tem um botão para baixar os resultados da busca atual
-  como `.xlsx` (`core/consulta.exportar_xlsx`) — a planilha continua no
-  escopo, mas como extração a partir do que foi pesquisado, não mais como
-  o produto de uma sessão de processamento.
-- A **Resposta** das consultas é guardada com parágrafos (separados por
-  `\n\n`), reconstruídos do layout do PDF; o detalhe na interface mostra um
-  bloco por parágrafo e a planilha quebra linha na coluna Resposta.
-  As **citações legais** (trechos de lei/decreto transcritos pelo fisco, em
-  itálico e corpo menor no PDF) aparecem com recuo à esquerda na interface,
-  para diferenciá-las do texto do fisco. A marcação usa um caractere
-  invisível (`MARCA_CITACAO`, em `core/pdf_text.py`) no início do parágrafo:
-  não há prefixo legível no texto guardado, e a planilha o descarta.
-  Sem itálico nem fonte menor no PDF, nenhum parágrafo é tratado como citação.
-- Consultas **já mapeadas** só ganham parágrafos ao **reimportar o PDF**
-  (o upsert atualiza o registro, sem duplicar).
+```bash
+python processar.py <pasta_com_pdfs> [--banco arquivo.db] [--xlsx saida.xlsx]
+                    [--dedup primeira|completo|recente] [--simular]
+```
 
-## Dados, logs e histórico
-- `MAPEADOR_DADOS` define a pasta do banco e dos logs (padrão: a raiz do projeto);
-  `MAPEADOR_BANCO` aponta um arquivo de banco específico, na interface e na CLI.
-- O log fica em `<dados>/logs/app.log` (rotativo, ~1 MB × 3) e traz o traceback das falhas.
-- Reimportar um ato com dados diferentes **atualiza** o registro e guarda a versão
-  anterior na tabela `historico` (aparece em "Histórico de alterações" no detalhe).
-  Cada PDF importado é registrado em `importacoes` com o SHA-256 e a versão do app.
-- O banco guarda a versão do schema (`PRAGMA user_version`). Um banco criado por
-  versão mais nova é recusado, sem alteração, até a ferramenta ser atualizada.
-- Na aba Processar, **Analisar** lê os PDFs e mostra o diagnóstico (erros por arquivo,
-  CNPJ inválido, campos vazios, datas fora do padrão) sem gravar; **Gravar no banco**
-  só grava depois. Os arquivos com erro não impedem a gravação dos demais.
+| Opção | Efeito |
+|---|---|
+| `--banco` | banco a usar; sem ela: `MAPEADOR_BANCO`, senão `mapeamento.db` na pasta de dados |
+| `--xlsx` | grava também uma planilha (sem ela, nenhuma planilha é gerada) |
+| `--dedup` | critério para o mesmo ato em mais de um arquivo (padrão: `primeira`) |
+| `--simular` | lê e diagnostica os PDFs **sem gravar nada** |
 
-## Testes
+A pasta é a primeira informação da linha de comando. Os PDFs são processados em
+ordem alfabética.
+
+| Código | Quando |
+|---|---|
+| `0` | tudo certo |
+| `1` | uso incorreto, nenhum PDF na pasta, planilha aberta no Excel ou banco de versão mais nova |
+| `2` | algum PDF falhou — os demais foram gravados; cada erro é listado, por arquivo, em stderr |
+
+Reprocessar a mesma pasta não duplica: cada consulta/regime já mapeado é
+atualizado (ver [seção 5](#5-dados-banco-e-histórico)).
+
+## 5. Dados, banco e histórico
+O banco é um SQLite local (`sqlite3` da biblioteca padrão).
+
+### Onde ficam os arquivos
+| Variável | Efeito |
+|---|---|
+| `MAPEADOR_DADOS` | pasta do banco e dos logs (padrão: a raiz do projeto; criada se não existir) |
+| `MAPEADOR_BANCO` | caminho de um banco específico (vale na interface e na CLI) |
+| `MAPEADOR_SEM_AUTOINSTALL` | `1` = não instala dependências; falha dizendo o que falta |
+
+O banco (`mapeamento.db`) e os logs não são versionados. **Trocar de máquina sem
+copiar o `mapeamento.db` perde o mapeamento acumulado.**
+
+Log: `<dados>/logs/app.log` (rotativo, ~1 MB × 3), com o traceback das falhas de
+PDF.
+
+### Chave natural e reimportação
+- Consultas: **Ano + Nº da Consulta**. Regimes: **Nº do Regime Especial + CNPJ
+  do requerente**.
+- Reimportar um ato **atualiza** o registro, não duplica — útil quando o parser é
+  corrigido depois. O valor novo sempre vence.
+- Se algum campo mudar, a linha anterior é guardada na tabela **`historico`**
+  (campos alterados, valor anterior, data UTC e versão do app) e aparece em
+  "Histórico de alterações" no detalhe. Reimportar um registro idêntico não gera
+  histórico.
+- Cada PDF importado é registrado em **`importacoes`** (nome, SHA-256, tipo,
+  quantidade de atos, data e versão do app).
+
+### Versão do schema
+O banco guarda a versão do schema em `PRAGMA user_version` (atual: 2). Bancos
+antigos são atualizados sem perder dados (só se acrescentam tabelas/colunas). Um
+banco criado por uma versão **mais nova** é recusado, sem nenhuma alteração, com
+uma mensagem pedindo para atualizar a ferramenta.
+
+## 6. O que é extraído
+**Consultas** (tabela `consultas`): Ano, Nº da Consulta, Data da Publicação,
+Protocolo, Súmula, Problema da Consulta, CNAE Detectado e Resposta.
+
+**Regimes especiais** (tabela `regimes`): Ano, Data, Nº DOE, RE PR Competitivo,
+Nº do Regime Especial, Empresa, CNPJ e CAD/ICMS do requerente, Vigência, Ementa,
+Abrangência, Benefícios/Procedimentos e Disposições Gerais. O parser considera
+concessões e alterações e registra o motivo dos descartes. As colunas `CNAE
+REQUERENTE` e `DESCRIÇÃO CNAE` existem no banco, mas **não são preenchidas**.
+
+### Resposta em parágrafos e citações legais
+A Resposta das consultas é guardada com parágrafos (separados por `\n\n`),
+reconstruídos do layout do PDF; o detalhe mostra um bloco por parágrafo e a
+planilha quebra linha na coluna. As **citações legais** (trechos de lei/decreto
+transcritos pelo fisco, em itálico e corpo menor) aparecem com recuo na
+interface. A marcação usa um caractere invisível (`MARCA_CITACAO`, em
+`core/pdf_text.py`) no início do parágrafo: não há prefixo legível no texto
+guardado e a planilha o descarta. Sem itálico nem fonte menor no PDF, nenhum
+parágrafo é tratado como citação. Consultas já mapeadas só ganham parágrafos ao
+**reimportar o PDF**.
+
+### Planilha `.xlsx`
+A planilha da sessão tem as abas *Consultas — a revisar*, *Regimes — a revisar*,
+*Log de descartes* e *Arquivos processados* (só as que tiverem conteúdo). A
+exportação da aba Consultar traz apenas a aba do tipo pesquisado.
+
+## 7. Arquitetura
+O motor (`core/`, `parsers/`) não depende do Streamlit: a CLI e a interface usam
+o mesmo caminho — `Execucao` → `pipeline` → `armazenamento`.
+
+| Arquivo | Responsabilidade |
+|---|---|
+| `core/pdf_text.py` | extração de texto (1 e 2 colunas, detecção de fonte); `texto_com_paragrafos` reconstrói os parágrafos |
+| `parsers/consultas.py` | parser das consultas |
+| `parsers/regimes.py` | parser dos regimes (filtra concessões/alterações) |
+| `core/pipeline.py` | processamento por arquivo e lote; critério de duplicados; hash e origem de cada ato |
+| `core/diagnostico.py` | erros e avisos do lote antes de gravar |
+| `core/execucao.py` | execução completa (carregar → diagnosticar → gravar) com callback de progresso |
+| `core/armazenamento.py` | SQLite: upsert pela chave natural, histórico, importações, schema versionado, busca |
+| `core/consulta.py` | busca por tipo, lista leve, detalhe, histórico e exportação |
+| `core/texto.py` | normalização de texto para a busca |
+| `core/planilha.py` | geração do `.xlsx` |
+| `core/acesso.py` | perfis (Consulta/Administrador) e conferência da senha |
+| `core/log.py` | log em arquivo |
+| `core/versao.py` | versão do app (`VERSAO_APP`) |
+| `core/bootstrap.py` | verificação e instalação das dependências |
+| `app.py` | interface Streamlit |
+| `processar.py` | linha de comando |
+| `iniciar.py` | abre a interface preparando o ambiente antes |
+| `Mapeador.bat` | atalho de duplo clique para `iniciar.py` |
+| `.streamlit/config.toml`, `assets/` | tema visual "ICMS Tech" |
+| `scripts/diag_consultas.py` | diagnóstico manual do parser de consultas |
+
+## 8. Dependências e bootstrap
+Faixas declaradas em `requirements.txt` (fonte única dos pinos):
+
+| Pacote | Faixa |
+|---|---|
+| `pdfplumber` | `>=0.11.9,<0.12` |
+| `openpyxl` | `>=3.1.5,<3.2` |
+| `streamlit` | `>=1.63,<2` |
+
+As faixas têm teto porque o resultado da extração depende do comportamento do
+`pdfplumber`: uma versão nova poderia mudar o texto extraído sem erro nenhum.
+Para subir um teto, rode a suíte de testes com a versão nova antes de alterar o
+`requirements.txt`.
+
+Cada ponto de entrada confere as bibliotecas de que precisa e instala as que
+faltarem:
+- `processar.py` (CLI) instala apenas `pdfplumber` e `openpyxl`;
+- `iniciar.py` instala também o `streamlit` (sem ele, `streamlit run app.py` nem
+  chegaria a executar o `app.py`).
+
+Uma biblioteca instalada fora da faixa (ex.: `streamlit` 1.30 quando o piso é
+1.63) conta como ausente e é atualizada. Quando nada falta, a verificação é um
+`find_spec` e uma leitura de metadados por pacote, sem subprocesso. Para exigir
+um ambiente já preparado (CI, imagem congelada), use
+`MAPEADOR_SEM_AUTOINSTALL=1`.
+
+## 9. Testes
 As dependências de desenvolvimento ficam separadas das de uso:
 
-    pip install -r requirements-dev.txt
-    pytest -v
+```bash
+pip install -r requirements-dev.txt
+python -m pytest -q
+```
 
-## Bootstrap de dependências
-Cada ponto de entrada confere as bibliotecas de que precisa e instala as que
-faltarem, usando as versões declaradas no `requirements.txt` — que segue sendo
-a fonte única dos pinos.
+A suíte tem 274 testes e leva cerca de um minuto. Os testes usam uma pasta de
+dados temporária (`tests/conftest.py`), nunca o banco real do projeto.
 
-- `processar.py` (CLI) instala apenas `pdfplumber` e `openpyxl`; não baixa a
-  interface para gerar uma planilha em lote.
-- `iniciar.py` instala também o `streamlit`. Ele existe porque
-  `streamlit run app.py` exige que o streamlit já esteja presente: sem ele o
-  comando nem chega a executar o `app.py`.
+## 10. Distribuição
+Hoje a entrega é pelo git — só os arquivos versionados, sem a pasta `.git` (que
+contém dados do autor) nem caches:
 
-Uma biblioteca instalada numa versão fora da faixa do `requirements.txt`
-(ex.: `streamlit` 1.30 quando o piso é 1.50) conta como ausente e é
-atualizada. As faixas têm teto (`<0.12`, `<3.2`, `<2`) porque o resultado da
-extração depende do comportamento do `pdfplumber`: uma versão nova poderia
-mudar o texto extraído sem erro nenhum. Para subir um teto, rode a suíte de
-testes com a versão nova antes de alterar o `requirements.txt`.
+```bash
+git archive --format=zip -o mapeador_pr.zip HEAD
+```
 
-Quando nada falta, a verificação é um `find_spec` e uma leitura de metadados
-por pacote, sem subprocesso — não há custo perceptível nem saída na tela.
+Na máquina de destino, `Mapeador.bat` cria o `.venv` na primeira execução (precisa
+de internet nessa vez). O `.streamlit/secrets.toml` e o `mapeamento.db` precisam
+ser criados/copiados à parte (não são versionados).
 
-Para exigir um ambiente já preparado (CI, imagem congelada), defina
-`MAPEADOR_SEM_AUTOINSTALL=1`: em vez de instalar, a ferramenta falha dizendo o
-que falta e qual comando resolve.
+## 11. Limitações conhecidas
+- Os padrões de vigência dos regimes cobrem os casos vistos; podem existir
+  outros no histórico do Diário Oficial.
+- Layouts de PDF muito diferentes dos fixtures podem exigir ajuste dos limiares
+  de `_marca_paragrafos_da_pagina` (`core/pdf_text.py`); se a detecção falhar, a
+  Resposta cai no texto achatado de sempre.
+- O banco é local (SQLite, um usuário por vez); a senha do Administrador é texto
+  puro no disco (ver [Perfis e senha](#perfis-e-senha-do-administrador)).
 
-## Distribuição
-Para entregar a ferramenta a outra máquina, gere o pacote pelo git — ele
-leva só os arquivos versionados, sem a pasta `.git` (que contém dados do
-autor) nem caches:
-
-    git archive --format=zip -o mapeador_pr.zip HEAD
-
-O Mapeador.bat cria um .venv na pasta da ferramenta na primeira execução (precisa de internet nessa vez).
-
-## Estrutura
-- core/pdf_text.py  — extração de texto (1 coluna, 2 colunas, detecção de fonte);
-  `texto_com_paragrafos` reconstrói os parágrafos da Resposta
-- core/acesso.py    — perfis (Consulta/Administrador) e conferência da senha
-- parsers/consultas.py — parser das consultas
-- parsers/regimes.py   — parser dos regimes (filtra concessões/alterações)
-- core/pipeline.py  — processamento por arquivo e lote, comum à CLI e à interface
-- core/armazenamento.py — persistência SQLite (upsert por chave natural)
-- core/consulta.py  — busca unificada por tipo, para a interface
-- core/planilha.py  — geração do .xlsx (exportação opcional)
-- core/bootstrap.py — verificação e instalação das dependências
-- app.py / processar.py — interface e CLI
-- iniciar.py — abre a interface preparando o ambiente antes
-- core/execucao.py  — execução completa (carregar → diagnosticar → gravar), usada pela CLI e pela interface
-- core/diagnostico.py — erros e avisos do lote antes de gravar
-- core/texto.py     — normalização de texto para a busca
-- core/log.py       — log em arquivo
-- core/versao.py    — versão do app
-- Mapeador.bat — atalho de duplo-clique para o iniciar.py
-
-## Fora deste escopo (fase 2)
-- Camada de IA: tema/segmento, favorável/desfavorável, potencial, resumo.
-  Os campos-placeholder que existiam para isso foram removidos dos parsers
-  (não apenas deixados vazios) — reintroduzi-los, se um dia fizer sentido,
-  exige adicionar campo e coluna de novo, não só implementar a análise.
-- Enriquecimento de CNAE via CNPJ (BrasilAPI) com cache local. Os campos
-  `CNAE REQUERENTE`/`DESCRIÇÃO CNAE` (regimes) continuam reservados, vazios,
-  para isso — confirmado: uma base com CNPJ/CNAE será encaminhada depois
-  para preencher essas colunas.
-- Vínculo com a carteira de clientes.
-- Controle de acesso além do perfil Administrador com senha local (ver
-  *Perfis e senha do Administrador*). Continuam pendentes: usuários
-  individuais, hospedagem fora da rede interna (o servidor continua só em
-  `127.0.0.1`) e banco em rede — os dados mapeados são públicos
-  (SEFA-PR/Diário Oficial), mas essa mudança não foi decidida.
-  **Planejado para depois:** hospedar a ferramenta para uso simultâneo por
-  vários usuários, com banco de dados em rede. Isso implica trocar o SQLite
-  local (`core/armazenamento.py`) por um banco cliente-servidor (o caminho
-  natural é PostgreSQL) — ver explicação detalhada na conversa de
-  implantação; não implementado nesta rodada.
-
-## Limitações conhecidas
-- Padrões de vigência cobrem os casos vistos; podem existir outros no histórico.
-- Layouts de PDF muito diferentes dos fixtures podem exigir ajuste dos
-  limiares de `_marca_paragrafos_da_pagina` (`core/pdf_text.py`); se a
-  detecção falhar, a Resposta cai no texto achatado de sempre.
+## 12. Desenvolvimento futuro
+O único item planejado é a **criação de um executável em binário** da
+ferramenta, a ser feita depois de concluídas as otimizações. Até lá, a
+distribuição segue como descrito na [seção 10](#10-distribuição).
