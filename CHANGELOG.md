@@ -2,6 +2,7 @@
 
 ## 0.8.0
 - **Edição manual** pelo administrador, de consultas e regimes: no detalhe do ato (aba Consultar) e na análise, antes de gravar. Todos os campos podem ser editados, inclusive a chave (número e CNPJ).
+- Na análise, a troca de chave confere o banco: é recusada se a chave nova já pertence a outro ato gravado ou se o ato já está gravado (nesse caso, corrija pelo detalhe em Consultar).
 - Corrigir a chave não duplica o ato: a chave antiga vira apelido, então reimportar o PDF original cai no ato corrigido.
 - Campos ajustados à mão **não são sobrescritos** pela reimportação. A análise lista os atos em conflito e o administrador marca quais sobrescrever com o PDF; na CLI, `--sobrescrever-ajustes`.
 - O histórico do ato diz se a alteração veio de **importação** ou de **ajuste manual**.

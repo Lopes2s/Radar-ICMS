@@ -305,8 +305,10 @@ def _editor_da_analise(analise):
             rotulo_envio="Salvar ajuste")
         if novos is not None:
             try:
-                r = edicao.ajustar_no_lote(lote, tipo, chave_atual, novos)
-            except (edicao.ChaveEmConflito, edicao.ChaveVazia, edicao.RegistroInexistente) as erro:
+                with armazenamento.sessao(_CAMINHO_BANCO) as conn:
+                    r = edicao.ajustar_no_lote(lote, tipo, chave_atual, novos, conn=conn)
+            except (edicao.ChaveEmConflito, edicao.ChaveJaGravada, edicao.ChaveVazia,
+                    edicao.RegistroInexistente) as erro:
                 st.error(str(erro))
             else:
                 _reanalisar(analise)

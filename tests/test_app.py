@@ -800,3 +800,19 @@ def test_editar_no_detalhe_de_ato_que_tambem_esta_na_analise_nao_duplica_chaves(
     assert not at.exception
     assert at.text_input(key=f"{PREFIXO}|EMPRESA").value == "Alfa Ltda"
     assert at.text_input(key=f"{PREFIXO_ANALISE}|EMPRESA").value == "Alfa Ltda"
+
+
+def test_na_analise_trocar_a_chave_de_ato_ja_gravado_mostra_o_erro_e_nada_muda():
+    conn = _banco_do_teste()
+    armazenamento.salvar_regimes(conn, [dict(REGIME)])
+    conn.close()
+    at = _app("admin")
+    at.session_state["analise"] = _analise_com(_lote_sem_vigencia())
+    at.run(timeout=30)
+    at.text_input(key=f"{PREFIXO_ANALISE}|CNPJ REQUERENTE").input("99.999.999/0001-99")
+    at.button(key=f"{PREFIXO_ANALISE}|enviar").click().run(timeout=30)
+    assert not at.exception
+    assert any("já está gravado" in e.value for e in at.error)
+    lote = at.session_state["analise"]["lote"]
+    assert lote.regimes[0]['CNPJ REQUERENTE'] == REGIME['CNPJ REQUERENTE']
+    assert lote.chaves_substituidas == []

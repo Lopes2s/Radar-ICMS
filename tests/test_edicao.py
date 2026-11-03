@@ -318,3 +318,47 @@ def test_gravar_o_lote_ajustado_cria_ajustes_e_apelidos_que_protegem_a_reimporta
     linhas = [r for r in armazenamento.buscar_regimes(conn) if r['Nº DO REGIME ESPECIAL'] == '9.053/2026']
     assert len(linhas) == 1 and linhas[0]['CNPJ REQUERENTE'] == '55'
     assert linhas[0]['VIGÊNCIA DO RE'] == '12 meses'
+
+
+# --- chave trocada na análise confere o banco --------------------------------
+def _lote_de(*regs):
+    return pipeline.Lote(regimes=list(regs))
+
+
+def test_analise_recusa_chave_que_pertence_a_outro_ato_do_banco(tmp_path):
+    conn = _conn(tmp_path)
+    a, b = _regime(), _regime(**{'Nº DO REGIME ESPECIAL': '2/2026', 'EMPRESA': 'Beta'})
+    armazenamento.salvar_regimes(conn, [a, b])
+    lote = _lote_de(dict(a))
+    with pytest.raises(edicao.ChaveEmConflito):
+        edicao.ajustar_no_lote(lote, 'regime', _chave_regime(a),
+                               {'Nº DO REGIME ESPECIAL': '2/2026'}, conn=conn)
+    assert lote.regimes[0] == a and lote.ajustados == {} and lote.chaves_substituidas == []
+
+
+def test_analise_recusa_trocar_a_chave_de_ato_ja_gravado(tmp_path):
+    conn = _conn(tmp_path)
+    a = _regime()
+    armazenamento.salvar_regimes(conn, [a])
+    lote = _lote_de(dict(a))
+    with pytest.raises(edicao.ChaveJaGravada):
+        edicao.ajustar_no_lote(lote, 'regime', _chave_regime(a),
+                               {'CNPJ REQUERENTE': '33'}, conn=conn)
+    assert lote.regimes[0] == a and lote.ajustados == {} and lote.chaves_substituidas == []
+    assert len(armazenamento.buscar_regimes(conn)) == 1
+
+
+def test_analise_ainda_deixa_corrigir_a_chave_e_campos_de_ato_ainda_nao_gravado(tmp_path):
+    conn = _conn(tmp_path)
+    armazenamento.salvar_regimes(conn, [_regime(**{'Nº DO REGIME ESPECIAL': '2/2026'})])
+    a = _regime()
+    lote = _lote_de(dict(a))
+    r = edicao.ajustar_no_lote(lote, 'regime', _chave_regime(a),
+                               {'CNPJ REQUERENTE': '33'}, conn=conn)
+    assert r['chave_trocada'] is True and lote.regimes[0]['CNPJ REQUERENTE'] == '33'
+    # editar campo comum de ato já gravado continua permitido
+    gravado = _regime(**{'Nº DO REGIME ESPECIAL': '2/2026'})
+    lote2 = _lote_de(dict(gravado))
+    r = edicao.ajustar_no_lote(lote2, 'regime', _chave_regime(gravado),
+                               {'EMENTA': 'x'}, conn=conn)
+    assert r['alterados'] == ['EMENTA']

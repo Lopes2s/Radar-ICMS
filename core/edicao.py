@@ -30,6 +30,10 @@ class ChaveEmConflito(ValueError):
     """A chave nova já pertence a outro ato."""
 
 
+class ChaveJaGravada(ValueError):
+    """Na análise, não se troca a chave de um ato que já está gravado."""
+
+
 class ChaveVazia(ValueError):
     """Nenhum campo da chave pode ficar em branco."""
 
@@ -140,11 +144,33 @@ def ajustes_em_conflito(conn, lote) -> list:
     return itens
 
 
-def ajustar_no_lote(lote, tipo: str, chave_atual: dict, novos: dict) -> dict:
+def _confere_chave_no_banco(conn, tabela, chave, antiga, nova):
+    def gravado(valores):
+        atual = armazenamento.resolver_chave(conn, tabela, chave, valores)
+        return atual, armazenamento.buscar_detalhe(conn, tabela, chave,
+                                                   dict(zip(chave, atual)))
+    ant_resolvida, ant_linha = gravado(antiga)
+    nova_resolvida, nova_linha = gravado(nova)
+    if nova_linha is not None and (ant_linha is None or nova_resolvida != ant_resolvida):
+        raise ChaveEmConflito(
+            "Já existe outro ato com essa chave. Corrija a chave para um valor livre "
+            "ou edite o ato existente.")
+    if ant_linha is not None:
+        raise ChaveJaGravada(
+            "Este ato já está gravado. Para corrigir a chave, abra o ato na aba Consultar "
+            "e use Editar.")
+
+
+def ajustar_no_lote(lote, tipo: str, chave_atual: dict, novos: dict, conn=None) -> dict:
     """Edita um ato que ainda está na ANÁLISE (só em memória). Mesmas regras de
     `editar_registro`, sem tocar o banco: registra em `lote.ajustados` os campos
     editados e em `lote.chaves_substituidas` a chave corrigida; `lote.origem` acompanha
-    a troca. O chamador refaz o diagnóstico depois."""
+    a troca. O chamador refaz o diagnóstico depois.
+
+    Com `conn`, a troca de chave também confere o banco: recusa uma chave que pertence
+    a outro ato gravado (ChaveEmConflito) e a troca da chave de um ato que já está
+    gravado (ChaveJaGravada; isso se corrige pelo detalhe, na aba Consultar). Um ato
+    ainda não gravado pode ter a chave corrigida livremente. Sem `conn`, só o lote conta."""
     tabela, colunas, chave = _tipo(tipo)
     _validar(colunas, novos)
     registros = lote.consultas if tipo == 'consulta' else lote.regimes
@@ -167,6 +193,8 @@ def ajustar_no_lote(lote, tipo: str, chave_atual: dict, novos: dict) -> dict:
     trocada = nova != procurada
     if trocada and any(chave_de(r) == nova for r in registros if r is not alvo):
         raise ChaveEmConflito("Outro ato desta análise já usa essa chave.")
+    if trocada and conn is not None:
+        _confere_chave_no_banco(conn, tabela, chave, procurada, nova)
 
     alvo.update({c: final[c] for c in alterados})
     campos = set(lote.ajustados.pop((tipo, *procurada), set()))

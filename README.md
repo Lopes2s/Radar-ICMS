@@ -146,7 +146,7 @@ Códigos do diagnóstico:
 O administrador corrige consultas e regimes em dois momentos:
 
 - **Depois de gravado**: na aba Consultar, abra o detalhe do ato e use **Editar**. Todos os campos são editáveis, inclusive a chave (número e CNPJ do regime; ano e número da consulta). Se a chave nova já pertencer a outro ato, a edição é recusada e nada muda.
-- **Na análise, antes de gravar**: em *Ajustar um ato antes de gravar*, escolha o ato apontado nos avisos e corrija os campos. O diagnóstico é refeito na hora e nada vai ao banco até **Gravar**.
+- **Na análise, antes de gravar**: em *Ajustar um ato antes de gravar*, escolha o ato apontado nos avisos e corrija os campos. O diagnóstico é refeito na hora e nada vai ao banco até **Gravar**. Aqui a chave só pode ser corrigida em ato que ainda não está gravado; uma chave que já pertence a outro ato gravado é recusada, e para corrigir a chave de um ato já gravado use o detalhe na aba Consultar.
 
 Cada edição guarda a versão anterior no histórico do ato (origem *ajuste manual*) e marca os campos editados como **ajustados**. Ao reimportar o PDF:
 
@@ -201,9 +201,10 @@ PDF.
 - Consultas: **Ano + Nº da Consulta**. Regimes: **Nº do Regime Especial + CNPJ
   do requerente**.
 - Reimportar um ato **atualiza** o registro, não duplica — útil quando o parser é
-  corrigido depois. O valor novo sempre vence.
+  corrigido depois. O valor novo sempre vence, exceto nos campos ajustados à mão
+  (ver [Edição manual](#edição-manual-administrador)).
 - Se algum campo mudar, a linha anterior é guardada na tabela **`historico`**
-  (campos alterados, valor anterior, data UTC e versão do app) e aparece em
+  (campos alterados, valor anterior, data UTC, versão do app e a **origem**: *importação* ou *ajuste manual*) e aparece em
   "Histórico de alterações" no detalhe. Reimportar um registro idêntico não gera
   histórico.
 - Cada PDF importado é registrado em **`importacoes`** (nome, SHA-256, tipo,
