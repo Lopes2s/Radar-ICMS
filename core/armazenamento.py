@@ -217,38 +217,48 @@ def mover_chave_auxiliares(conn, tabela, chave, antiga, nova) -> None:
                  (jn, tabela, ja))
 
 
-def _upsert(conn: sqlite3.Connection, tabela: str, colunas: list,
-           chave: list, registros: list) -> dict:
-    """Upsert genérico por chave natural. Devolve {'novos': N, 'atualizados': M}.
+def _upsert(conn: sqlite3.Connection, tabela: str, colunas: list, chave: list,
+            registros: list, sobrescrever=()) -> dict:
+    """Upsert por chave natural. Devolve {'novos': N, 'atualizados': M}.
 
-    Quando o registro já existe e algum campo (fora a chave) muda, a linha
-    anterior é guardada em `historico` antes de ser sobrescrita. O valor novo
-    sempre vence, inclusive vazio: o histórico é que preserva o anterior.
+    - A chave recebida passa por `resolver_chave`: se o ato teve a chave corrigida
+      à mão, a reimportação cai nele (não duplica).
+    - Quando o ato já existe e algum campo (fora a chave) muda, a linha anterior
+      vai para `historico` antes da atualização.
+    - Campos ajustados à mão (tabela `ajustes`) NÃO são sobrescritos, salvo se a
+      chave do ato estiver em `sobrescrever` (conjunto de tuplas de valores da
+      chave atual): aí o valor do PDF vence e os ajustes do ato são apagados.
     """
-    chave_sql = ' AND '.join(f'"{c}" = ?' for c in chave)
+    sobrescrever = {tuple(k) for k in sobrescrever}
     colnames = ', '.join(f'"{c}"' for c in colunas)
     placeholders = ', '.join('?' for _ in colunas)
-    conflito = ', '.join(f'"{c}"' for c in chave)
-    sets = ', '.join(f'"{c}"=excluded."{c}"' for c in colunas if c not in chave)
-    upsert_sql = (
-        f'INSERT INTO {tabela} ({colnames}) VALUES ({placeholders}) '
-        f'ON CONFLICT({conflito}) DO UPDATE SET {sets}'
-    )
+    insert_sql = f'INSERT INTO {tabela} ({colnames}) VALUES ({placeholders})'
+    where = ' AND '.join(f'"{c}" = ?' for c in chave)
     novos = atualizados = 0
     for reg in registros:
-        chave_valores = tuple(reg.get(c, '') for c in chave)
+        recebida = tuple(reg.get(c, '') for c in chave)
+        chave_valores = resolver_chave(conn, tabela, chave, recebida)
+        reg = {**reg, **dict(zip(chave, chave_valores))}
         anterior = conn.execute(
-            f'SELECT * FROM {tabela} WHERE {chave_sql}', chave_valores
-        ).fetchone()
-        if anterior is not None:
-            alterados = [c for c in colunas if c not in chave
-                         and str(anterior[c] or '') != str(reg.get(c, '') or '')]
-            if alterados:
-                registrar_alteracao(conn, tabela, chave, chave_valores,
-                                    anterior, alterados)
-        conn.execute(upsert_sql, tuple(reg.get(c, '') for c in colunas))
-        novos += anterior is None
-        atualizados += anterior is not None
+            f'SELECT * FROM {tabela} WHERE {where}', chave_valores).fetchone()
+        if anterior is None:
+            conn.execute(insert_sql, tuple(reg.get(c, '') for c in colunas))
+            novos += 1
+            continue
+        atualizados += 1
+        sobrescreve = chave_valores in sobrescrever
+        protegidos = set() if sobrescreve else set(
+            ajustes_de(conn, tabela, chave, chave_valores))
+        a_atualizar = [c for c in colunas if c not in chave and c not in protegidos]
+        alterados = [c for c in a_atualizar
+                     if str(anterior[c] or '') != str(reg.get(c, '') or '')]
+        if alterados:
+            registrar_alteracao(conn, tabela, chave, chave_valores, anterior, alterados)
+            sets = ', '.join(f'"{c}" = ?' for c in alterados)
+            conn.execute(f'UPDATE {tabela} SET {sets} WHERE {where}',
+                         [reg.get(c, '') for c in alterados] + list(chave_valores))
+        if sobrescreve:
+            limpar_ajustes(conn, tabela, chave, chave_valores)
     conn.commit()
     return {'novos': novos, 'atualizados': atualizados}
 
@@ -328,14 +338,19 @@ def criar_esquema(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def salvar_consultas(conn: sqlite3.Connection, registros: list) -> dict:
-    """Upsert por CHAVE_CONSULTAS. Devolve {'novos': N, 'atualizados': M}."""
-    return _upsert(conn, 'consultas', COLUNAS_CONSULTAS, CHAVE_CONSULTAS, registros)
+def salvar_consultas(conn: sqlite3.Connection, registros: list, sobrescrever=()) -> dict:
+    """Upsert por CHAVE_CONSULTAS. Devolve {'novos': N, 'atualizados': M}.
+    `sobrescrever`: tuplas (Ano, Nº da Consulta) cujos ajustes manuais o PDF vence."""
+    return _upsert(conn, 'consultas', COLUNAS_CONSULTAS, CHAVE_CONSULTAS, registros,
+                   sobrescrever)
 
 
-def salvar_regimes(conn: sqlite3.Connection, registros: list) -> dict:
-    """Upsert por CHAVE_REGIMES. Devolve {'novos': N, 'atualizados': M}."""
-    return _upsert(conn, 'regimes', COLUNAS_REGIMES, CHAVE_REGIMES, registros)
+def salvar_regimes(conn: sqlite3.Connection, registros: list, sobrescrever=()) -> dict:
+    """Upsert por CHAVE_REGIMES. Devolve {'novos': N, 'atualizados': M}.
+    `sobrescrever`: tuplas (Nº DO REGIME ESPECIAL, CNPJ REQUERENTE) cujos ajustes
+    manuais o PDF vence."""
+    return _upsert(conn, 'regimes', COLUNAS_REGIMES, CHAVE_REGIMES, registros,
+                   sobrescrever)
 
 
 _CAMPOS_BUSCA_CONSULTAS = ['Nº da Consulta', 'Súmula', 'Problema da Consulta',
@@ -401,9 +416,16 @@ def buscar_detalhe(conn: sqlite3.Connection, tabela: str, chave: list,
     return dict(linha) if linha else None
 
 
-def persistir_lote(conn: sqlite3.Connection, lote: Lote) -> dict:
-    """Persiste um core.pipeline.Lote inteiro (consultas + regimes) de uma vez."""
-    resultado = {'consultas': salvar_consultas(conn, lote.consultas),
-                 'regimes': salvar_regimes(conn, lote.regimes)}
+def persistir_lote(conn: sqlite3.Connection, lote: Lote, sobrescrever=()) -> dict:
+    """Persiste um core.pipeline.Lote inteiro (consultas + regimes) de uma vez.
+
+    `sobrescrever`: itens ('consulta'|'regime', *valores_da_chave) cujos ajustes
+    manuais o PDF deve vencer; os demais atos ajustados mantêm o valor do ajuste."""
+    por_tipo = {'consulta': set(), 'regime': set()}
+    for item in sobrescrever:
+        por_tipo[item[0]].add(tuple(item[1:]))
+    resultado = {
+        'consultas': salvar_consultas(conn, lote.consultas, por_tipo['consulta']),
+        'regimes': salvar_regimes(conn, lote.regimes, por_tipo['regime'])}
     registrar_importacoes(conn, lote.importacoes)
     return resultado

@@ -140,3 +140,83 @@ def test_falha_no_meio_da_edicao_nao_deixa_gravacao_parcial(tmp_path, monkeypatc
     assert salvo['CNPJ REQUERENTE'] == '00' and salvo['EMPRESA'] == 'Alfa Ltda'
     assert conn.execute("SELECT COUNT(*) FROM historico").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM ajustes").fetchone()[0] == 0
+
+
+# --- reimportação: proteção dos ajustes e apelidos --------------------------
+def test_reimportar_mantem_o_campo_ajustado_a_mao_e_atualiza_o_resto(tmp_path):
+    conn = _conn(tmp_path)
+    armazenamento.salvar_regimes(conn, [_regime()])
+    edicao.editar_registro(conn, 'regime', _chave_regime(), {'VIGÊNCIA DO RE': '12 meses'})
+
+    resultado = armazenamento.salvar_regimes(
+        conn, [_regime(**{'VIGÊNCIA DO RE': '', 'EMENTA': 'ementa nova'})])
+
+    assert resultado == {'novos': 0, 'atualizados': 1}
+    salvo = armazenamento.buscar_regimes(conn)[0]
+    assert salvo['VIGÊNCIA DO RE'] == '12 meses'          # ajuste mantido
+    assert salvo['EMENTA'] == 'ementa nova'               # o resto segue o PDF
+    hist = armazenamento.historico_de(conn, 'regimes', _chave_regime())
+    assert [h['origem'] for h in hist] == ['importacao', 'manual']   # mais recente primeiro
+    assert hist[0]['campos_alterados'] == ['EMENTA']
+
+
+def test_sobrescrever_aplica_o_pdf_e_limpa_os_ajustes(tmp_path):
+    conn = _conn(tmp_path)
+    armazenamento.salvar_regimes(conn, [_regime()])
+    edicao.editar_registro(conn, 'regime', _chave_regime(), {'VIGÊNCIA DO RE': '12 meses'})
+    chave = tuple(_chave_regime().values())
+
+    armazenamento.salvar_regimes(conn, [_regime(**{'VIGÊNCIA DO RE': ''})], sobrescrever={chave})
+
+    assert armazenamento.buscar_regimes(conn)[0]['VIGÊNCIA DO RE'] == ''
+    assert armazenamento.ajustes_de(conn, 'regimes', CHAVE_R, chave) == []
+    ultimo = armazenamento.historico_de(conn, 'regimes', _chave_regime())[0]
+    assert ultimo['origem'] == 'importacao'
+    assert ultimo['registro_anterior']['VIGÊNCIA DO RE'] == '12 meses'
+
+
+def test_reimportar_o_pdf_original_cai_no_ato_com_a_chave_corrigida(tmp_path):
+    conn = _conn(tmp_path)
+    errado = _regime(**{'CNPJ REQUERENTE': '00.000.000/0000-00'})
+    armazenamento.salvar_regimes(conn, [errado])
+    edicao.editar_registro(conn, 'regime',
+                           {c: errado[c] for c in CHAVE_R},
+                           {'CNPJ REQUERENTE': '11.222.333/0001-81'})
+
+    resultado = armazenamento.salvar_regimes(conn, [{**errado, 'EMENTA': 'ementa do PDF 2'}])
+
+    assert resultado == {'novos': 0, 'atualizados': 1}            # não duplicou
+    linhas = armazenamento.buscar_regimes(conn)
+    assert len(linhas) == 1
+    assert linhas[0]['CNPJ REQUERENTE'] == '11.222.333/0001-81'   # a chave corrigida prevalece
+    assert linhas[0]['EMENTA'] == 'ementa do PDF 2'
+
+
+def test_duas_correcoes_seguidas_de_chave_reimportando_a_primeira(tmp_path):
+    conn = _conn(tmp_path)
+    a = _regime(**{'CNPJ REQUERENTE': 'A'})
+    armazenamento.salvar_regimes(conn, [a])
+    num = '9.053/2026'
+    edicao.editar_registro(conn, 'regime', {'Nº DO REGIME ESPECIAL': num, 'CNPJ REQUERENTE': 'A'},
+                           {'CNPJ REQUERENTE': 'B'})
+    edicao.editar_registro(conn, 'regime', {'Nº DO REGIME ESPECIAL': num, 'CNPJ REQUERENTE': 'B'},
+                           {'CNPJ REQUERENTE': 'C'})
+    armazenamento.salvar_regimes(conn, [a])
+    linhas = armazenamento.buscar_regimes(conn)
+    assert len(linhas) == 1 and linhas[0]['CNPJ REQUERENTE'] == 'C'
+
+
+def test_persistir_lote_repassa_o_sobrescrever_e_mantem_o_formato_do_retorno(tmp_path):
+    conn = _conn(tmp_path)
+    armazenamento.salvar_regimes(conn, [_regime()])
+    edicao.editar_registro(conn, 'regime', _chave_regime(), {'VIGÊNCIA DO RE': '12 meses'})
+    lote = pipeline.Lote(regimes=[_regime(**{'VIGÊNCIA DO RE': ''})])
+
+    r1 = armazenamento.persistir_lote(conn, lote)
+    assert r1 == {'consultas': {'novos': 0, 'atualizados': 0},
+                  'regimes': {'novos': 0, 'atualizados': 1}}
+    assert armazenamento.buscar_regimes(conn)[0]['VIGÊNCIA DO RE'] == '12 meses'
+
+    chave = ('regime', *tuple(_chave_regime().values()))
+    armazenamento.persistir_lote(conn, lote, sobrescrever=[chave])
+    assert armazenamento.buscar_regimes(conn)[0]['VIGÊNCIA DO RE'] == ''
