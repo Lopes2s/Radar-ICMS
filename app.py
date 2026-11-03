@@ -14,10 +14,10 @@ garantir_dependencias(DEPS_APP)
 
 import streamlit as st  # noqa: E402
 
-from core import acesso, armazenamento, consulta, log, planilha  # noqa: E402
+from core import acesso, armazenamento, consulta, edicao, log, planilha  # noqa: E402
 from core.execucao import Execucao  # noqa: E402
 from core.pdf_text import MARCA_CITACAO  # noqa: E402
-from interface import design  # noqa: E402
+from interface import design, formularios  # noqa: E402
 
 log.configurar_log(armazenamento.pasta_dados())
 
@@ -74,6 +74,7 @@ def _fecha_selecao_da_tabela():
     senão). Reatribui a chave inteira — o estado de seleção do st.dataframe
     é só-leitura, não dá para mudar em lugar (ver DataframeSelectionState)."""
     st.session_state["tabela-resultados"] = {"selection": {"rows": []}}
+    st.session_state.pop("editando", None)
 
 
 # Os campos numerados de regime (ABRANGÊNCIA, BENEFÍCIOS/PROCEDIMENTOS,
@@ -121,9 +122,64 @@ def _resposta_em_paragrafos(texto: str) -> str:
     return "".join(saida)
 
 
+def _comecar_edicao(prefixo: str):
+    st.session_state["editando"] = prefixo
+
+
+def _cancelar_edicao():
+    st.session_state.pop("editando", None)
+    st.session_state.pop("erro_edicao", None)
+
+
+def _avisar(r: dict, o_que: str):
+    """Mensagem do resultado de uma edição (vira toast depois do st.rerun)."""
+    if not r["alterados"]:
+        st.session_state["aviso"] = "Nenhum campo foi alterado."
+        return
+    st.session_state["aviso"] = (f"{o_que}: {len(r['alterados'])} campo(s) alterado(s)."
+                                 + (" A chave foi corrigida." if r["chave_trocada"] else ""))
+
+
+def _salvar_edicao(tipo: str, registro: dict, colunas: list, prefixo: str):
+    """on_click do formulário do detalhe: roda ANTES do script, por isso pode zerar a
+    seleção da tabela (o que não se pode fazer depois que ela foi desenhada). Grava a
+    edição (só administrador); em erro de regra guarda a mensagem para o detalhe mostrar
+    e mantém o formulário aberto; com sucesso o detalhe fecha."""
+    acesso.exige_admin(st.session_state.get("perfil"))
+    novos = {c: st.session_state.get(f"{prefixo}|{c}", "") for c in colunas}
+    chave_atual = {c: registro[c] for c in edicao.TIPOS[tipo][2]}
+    try:
+        with armazenamento.sessao(_CAMINHO_BANCO) as conn:
+            r = edicao.editar_registro(conn, tipo, chave_atual, novos)
+    except (edicao.ChaveEmConflito, edicao.ChaveVazia, edicao.RegistroInexistente) as erro:
+        st.session_state["erro_edicao"] = str(erro)
+        return
+    st.session_state.pop("erro_edicao", None)
+    _avisar(r, "Ato atualizado")
+    _fecha_selecao_da_tabela()
+
+
 @st.dialog("Detalhes", width="large", on_dismiss=_fecha_selecao_da_tabela)
-def _mostra_detalhe(tipo: str, registro: dict, colunas: list, historico=()):
+def _mostra_detalhe(tipo: str, registro: dict, colunas: list, historico=(),
+                    pode_editar: bool = False, ajustes=()):
     st.subheader(_titulo_do_registro(tipo, registro))
+    chave = edicao.TIPOS[tipo][2]
+    prefixo = formularios.prefixo_de(tipo, [registro[c] for c in chave])
+
+    if pode_editar and st.session_state.get("editando") == prefixo:
+        st.caption("Edite os campos e salve. Cada alteração fica no histórico do ato.")
+        erro = st.session_state.pop("erro_edicao", None)
+        if erro:
+            st.error(erro)
+        formularios.formulario_registro(tipo, registro, colunas, chave, prefixo=prefixo,
+                                        ao_enviar=_salvar_edicao,
+                                        args=(tipo, registro, colunas, prefixo))
+        st.button("Cancelar", key="cancelar-edicao", type="tertiary",
+                  icon=":material/close:", on_click=_cancelar_edicao)
+        return
+
+    if ajustes:
+        st.caption("Ajustado manualmente: " + ", ".join(ajustes))
     for campo in colunas:
         valor = registro.get(campo, "")
         if not valor:
@@ -136,10 +192,14 @@ def _mostra_detalhe(tipo: str, registro: dict, colunas: list, historico=()):
             st.markdown(_resposta_em_paragrafos(valor), unsafe_allow_html=True)
         else:
             st.write(valor)
+    if pode_editar:
+        st.button("Editar", key="editar-registro", icon=":material/edit:",
+                  on_click=_comecar_edicao, args=(prefixo,))
     if historico:
         with st.expander(f"Histórico de alterações ({len(historico)})"):
             for h in historico:
-                st.markdown(f"**{h['alterado_em']}** (versão {h['versao_app']}) — "
+                quem = "ajuste manual" if h.get("origem") == "manual" else "importação"
+                st.markdown(f"**{h['alterado_em']}** · {quem} (versão {h['versao_app']}) — "
                             f"campos alterados: {', '.join(h['campos_alterados'])}")
 
 
@@ -322,6 +382,10 @@ except armazenamento.SchemaMaisNovo as erro:
     st.error(str(erro))
     st.stop()
 
+_aviso = st.session_state.pop("aviso", None)   # mensagem deixada antes de um st.rerun()
+if _aviso:
+    st.toast(_aviso, icon=":material/check_circle:")
+
 if perfil == acesso.PERFIL_ADMIN:
     aba_processar, aba_consultar = st.tabs(
         [":material/upload: Processar e mapear", ":material/search: Consultar"])
@@ -449,7 +513,9 @@ def _renderiza_consultar(conn):
             completo = consulta.detalhe(conn, tipo, resultados[linhas_selecionadas[0]])
             if completo is not None:
                 _mostra_detalhe(tipo, completo, cols_do_tipo,
-                                consulta.historico(conn, tipo, completo))
+                                consulta.historico(conn, tipo, completo),
+                                pode_editar=(perfil == acesso.PERFIL_ADMIN),
+                                ajustes=consulta.ajustes(conn, tipo, completo))
 
         st.download_button(
             "Baixar estes resultados (.xlsx)",

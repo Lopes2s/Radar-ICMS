@@ -9,7 +9,8 @@ import pytest
 
 pytest.importorskip("streamlit")
 from streamlit.testing.v1 import AppTest  # noqa: E402
-from core import acesso, armazenamento  # noqa: E402
+from core import acesso, armazenamento, diagnostico, edicao, pipeline  # noqa: E402
+from interface import formularios  # noqa: E402
 
 APP = os.path.join(os.path.dirname(os.path.dirname(__file__)), "app.py")
 
@@ -565,3 +566,119 @@ def test_busca_sem_resultado_mostra_o_estado_vazio_de_filtro():
 def test_analisar_fica_desabilitado_sem_arquivos():
     at = _app().run(timeout=30)
     assert at.button(key="analisar").disabled is True
+
+
+# --- edição manual (detalhe e análise) --------------------------------------
+REGIME = {'ANO': '2026', 'DATA': '2026-03-01', 'Nº DO REGIME ESPECIAL': '9.053/2026',
+          'EMPRESA': 'Alfa Ltda', 'CNPJ REQUERENTE': '11.222.333/0001-81',
+          'VIGÊNCIA DO RE': '', 'EMENTA': 'ementa original'}
+PREFIXO = formularios.prefixo_de('regime', [REGIME['Nº DO REGIME ESPECIAL'],
+                                            REGIME['CNPJ REQUERENTE']])
+
+
+def _banco_do_teste():
+    conn = armazenamento.conectar(os.environ["MAPEADOR_BANCO"])
+    armazenamento.criar_esquema(conn)
+    return conn
+
+
+def _regimes_no_banco():
+    conn = _banco_do_teste()
+    try:
+        return armazenamento.buscar_regimes(conn)
+    finally:
+        conn.close()
+
+
+def _linha_0(at):
+    """O AppTest não guarda a seleção da tabela entre execuções (um navegador guarda):
+    reinjeta a linha 0 antes de cada interação com o detalhe."""
+    at.session_state["tabela-resultados"] = {"selection": {"rows": [0], "columns": []}}
+
+
+def _abre_o_detalhe_do_regime(perfil, regimes=(REGIME,)):
+    """Semeia os regimes, abre a aba Consultar no tipo 'regime' e seleciona a linha 0."""
+    _semeia(regimes=list(regimes))
+    at = _app(perfil).run(timeout=30)
+    aba = at.tabs[1] if perfil == "admin" else at.tabs[0]
+    aba.selectbox[0].set_value("regime").run(timeout=30)
+    _linha_0(at)
+    at.run(timeout=30)
+    return at
+
+
+def test_perfil_consulta_nao_ve_o_botao_editar():
+    at = _abre_o_detalhe_do_regime("consulta")
+    assert any("Regime Especial nº 9.053/2026" in s.value for s in at.subheader)
+    assert "editar-registro" not in {b.key for b in at.button}
+
+
+def test_admin_ve_o_botao_editar_e_o_formulario_traz_os_valores_atuais():
+    at = _abre_o_detalhe_do_regime("admin")
+    assert "editar-registro" in {b.key for b in at.button}
+    _linha_0(at)
+    at.button(key="editar-registro").click().run(timeout=30)
+    assert not at.exception
+    assert at.text_input(key=f"{PREFIXO}|EMPRESA").value == "Alfa Ltda"
+    assert at.text_input(key=f"{PREFIXO}|CNPJ REQUERENTE").value == "11.222.333/0001-81"
+    assert at.text_area(key=f"{PREFIXO}|EMENTA").value == "ementa original"
+
+
+def test_admin_edita_um_campo_do_regime_pelo_detalhe():
+    at = _abre_o_detalhe_do_regime("admin")
+    _linha_0(at)
+    at.button(key="editar-registro").click().run(timeout=30)
+    at.text_input(key=f"{PREFIXO}|VIGÊNCIA DO RE").input("12 meses")
+    _linha_0(at)
+    at.button(key=f"{PREFIXO}|enviar").click().run(timeout=30)
+    assert not at.exception
+    assert _regimes_no_banco()[0]['VIGÊNCIA DO RE'] == '12 meses'
+    conn = _banco_do_teste()
+    historico = armazenamento.historico_de(conn, 'regimes', {
+        'Nº DO REGIME ESPECIAL': '9.053/2026', 'CNPJ REQUERENTE': '11.222.333/0001-81'})
+    conn.close()
+    assert historico[0]['origem'] == 'manual'
+    assert "editando" not in at.session_state.filtered_state       # saiu do modo edição
+    assert any("Ato atualizado" in t.value for t in at.toast)
+
+
+def test_admin_corrige_a_chave_do_regime_pelo_detalhe():
+    at = _abre_o_detalhe_do_regime("admin")
+    _linha_0(at)
+    at.button(key="editar-registro").click().run(timeout=30)
+    at.text_input(key=f"{PREFIXO}|CNPJ REQUERENTE").input("99.999.999/0001-99")
+    _linha_0(at)
+    at.button(key=f"{PREFIXO}|enviar").click().run(timeout=30)
+    assert not at.exception
+    linhas = _regimes_no_banco()
+    assert len(linhas) == 1 and linhas[0]['CNPJ REQUERENTE'] == '99.999.999/0001-99'
+    assert any("chave foi corrigida" in t.value for t in at.toast)
+
+
+def test_chave_em_conflito_mostra_o_erro_e_nao_grava():
+    outro = {**REGIME, 'Nº DO REGIME ESPECIAL': '1/2026', 'EMPRESA': 'Outra'}
+    at = _abre_o_detalhe_do_regime("admin", regimes=(REGIME, outro))
+    _linha_0(at)
+    at.button(key="editar-registro").click().run(timeout=30)
+    # a linha 0 aberta pode ser qualquer um dos dois: lê a chave que está na tela
+    campo = next(t for t in at.text_input
+                 if (t.key or "").endswith("|Nº DO REGIME ESPECIAL"))
+    prefixo = campo.key.rsplit("|", 1)[0]
+    de_fora = '1/2026' if campo.value == '9.053/2026' else '9.053/2026'
+    campo.input(de_fora)
+    _linha_0(at)
+    at.button(key=f"{prefixo}|enviar").click().run(timeout=30)
+    assert not at.exception
+    assert any("Já existe outro ato com essa chave" in e.value for e in at.error)
+    assert {r['Nº DO REGIME ESPECIAL'] for r in _regimes_no_banco()} == {'9.053/2026', '1/2026'}
+
+
+def test_cancelar_a_edicao_volta_ao_detalhe():
+    at = _abre_o_detalhe_do_regime("admin")
+    _linha_0(at)
+    at.button(key="editar-registro").click().run(timeout=30)
+    _linha_0(at)
+    at.button(key="cancelar-edicao").click().run(timeout=30)
+    assert not at.exception
+    assert "editar-registro" in {b.key for b in at.button}
+    assert _regimes_no_banco()[0]['EMENTA'] == 'ementa original'
