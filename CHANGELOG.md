@@ -1,5 +1,12 @@
 # Histórico de versões
 
+## 0.9.0
+- **Consulta do CNPJ na BrasilAPI**: ao gravar, o CNPJ de cada regime é consultado (CNAE principal e situação cadastral). O resultado fica à parte do regime e aparece no detalhe, para qualquer perfil.
+- O CNAE da Receita é o **atual** da empresa, então nunca sobrescreve o regime sozinho: se o regime já tem um CNAE diferente, o detalhe avisa; o administrador pode **aplicar** o CNAE da Receita ao regime (fica no histórico como ajuste manual) e **atualizar** a consulta quando quiser.
+- Falha de rede não impede a gravação: a consulta é refeita pelo botão do detalhe. Consultas com menos de 30 dias são reaproveitadas.
+- Consulta desligável: `--sem-consulta-cnpj` na CLI ou `MAPEADOR_CONSULTA_CNPJ=0`. Só o CNPJ (dado público) sai da máquina; nenhuma dependência nova.
+- Schema 4 (tabela `cnpj_receita`); bancos do schema 3 migram sozinhos.
+
 ## 0.8.0
 - **Edição manual** pelo administrador, de consultas e regimes: no detalhe do ato (aba Consultar) e na análise, antes de gravar. Todos os campos podem ser editados, inclusive a chave (número e CNPJ).
 - Na análise, a troca de chave confere o banco: é recusada se a chave nova já pertence a outro ato gravado ou se o ato já está gravado (nesse caso, corrija pelo detalhe em Consultar).

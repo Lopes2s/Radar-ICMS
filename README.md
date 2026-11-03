@@ -4,7 +4,7 @@ Ferramenta local que lê PDFs da SEFA-PR (consultas tributárias) e do Diário
 Oficial (regimes especiais), extrai os campos objetivos, mapeia tudo num banco
 SQLite e permite consultar o que foi mapeado por uma interface web (Streamlit).
 
-Versão atual: **0.8.0** (histórico em [`CHANGELOG.md`](CHANGELOG.md)).
+Versão atual: **0.9.0** (histórico em [`CHANGELOG.md`](CHANGELOG.md)).
 
 ## Sumário
 1. [O que a ferramenta faz](#1-o-que-a-ferramenta-faz)
@@ -153,12 +153,20 @@ Cada edição guarda a versão anterior no histórico do ato (origem *ajuste man
 - os campos ajustados **não são sobrescritos** — a análise lista os atos em conflito e você marca *Sobrescrever com o PDF* só nos que quiser (por padrão, nenhum);
 - se a chave foi corrigida, o PDF original **cai no ato corrigido** em vez de criar um duplicado.
 
+### Consulta do CNPJ (Receita Federal)
+Ao **gravar**, o CNPJ de cada regime é consultado na [BrasilAPI](https://brasilapi.com.br/), que devolve o **CNAE principal** e a **situação cadastral** da empresa. O resultado fica na tabela `cnpj_receita`, **à parte do regime**, e aparece no detalhe do regime (aba Consultar) para qualquer perfil.
+
+- O CNAE da Receita é o **atual** da empresa e pode diferir do vigente na data do regime; por isso ele não sobrescreve nada sozinho. Se o regime já tiver um CNAE diferente, o detalhe mostra um aviso de divergência.
+- O administrador pode **Consultar CNPJ / Atualizar consulta** pelo detalhe e **Aplicar CNAE da Receita ao regime** (preenche *CNAE REQUERENTE* e *DESCRIÇÃO CNAE*; fica no histórico como ajuste manual e a reimportação não o desfaz). Após a consulta o detalhe fecha e o resultado aparece ao reabrir o ato.
+- Consultas com menos de 30 dias são reaproveitadas. Sem internet, a gravação segue normalmente e a tela (ou a CLI) avisa que a consulta falhou; duas falhas de conexão seguidas interrompem o resto do lote.
+- Só o CNPJ (dado público) sai da máquina. Para desligar: `--sem-consulta-cnpj` na CLI ou a variável de ambiente `MAPEADOR_CONSULTA_CNPJ=0`.
+
 ## 4. Linha de comando
 
 ```bash
 python processar.py <pasta_com_pdfs> [--banco arquivo.db] [--xlsx saida.xlsx]
                     [--dedup primeira|completo|recente] [--simular]
-                    [--sobrescrever-ajustes]
+                    [--sobrescrever-ajustes] [--sem-consulta-cnpj]
 ```
 
 | Opção | Efeito |
@@ -168,6 +176,7 @@ python processar.py <pasta_com_pdfs> [--banco arquivo.db] [--xlsx saida.xlsx]
 | `--dedup` | critério para o mesmo ato em mais de um arquivo (padrão: `primeira`) |
 | `--simular` | lê e diagnostica os PDFs **sem gravar nada** |
 | `--sobrescrever-ajustes` | o valor do PDF vence também nos campos que o administrador ajustou à mão (por padrão o ajuste é mantido e a CLI avisa) |
+| `--sem-consulta-cnpj` | não consulta o CNPJ dos regimes na BrasilAPI ao gravar (também desligável com `MAPEADOR_CONSULTA_CNPJ=0`) |
 
 A pasta é a primeira informação da linha de comando. Os PDFs são processados em
 ordem alfabética.
@@ -211,7 +220,7 @@ PDF.
   quantidade de atos, data e versão do app).
 
 ### Versão do schema
-O banco guarda a versão do schema em `PRAGMA user_version` (atual: 3). Bancos
+O banco guarda a versão do schema em `PRAGMA user_version` (atual: 4). Bancos
 antigos são atualizados sem perder dados (só se acrescentam tabelas/colunas). Um
 banco criado por uma versão **mais nova** é recusado, sem nenhuma alteração, com
 uma mensagem pedindo para atualizar a ferramenta.
@@ -256,6 +265,7 @@ o mesmo caminho — `Execucao` → `pipeline` → `armazenamento`.
 | `core/execucao.py` | execução completa (carregar → diagnosticar → gravar) com callback de progresso |
 | `core/armazenamento.py` | SQLite: upsert pela chave natural, histórico, importações, schema versionado, busca |
 | `core/consulta.py` | busca por tipo, lista leve, detalhe, histórico e exportação |
+| `core/cnpj.py` | consulta do CNPJ na BrasilAPI (CNAE e situação), com reaproveitamento e tolerância a falha de rede |
 | `core/texto.py` | normalização de texto para a busca |
 | `core/planilha.py` | geração do `.xlsx` |
 | `core/acesso.py` | perfis (Consulta/Administrador) e conferência da senha |
@@ -306,7 +316,7 @@ pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-A suíte tem 357 testes e leva cerca de um minuto. Os testes usam uma pasta de
+A suíte tem 416 testes e leva cerca de um minuto. Os testes usam uma pasta de
 dados temporária (`tests/conftest.py`), nunca o banco real do projeto.
 
 ## 10. Distribuição
@@ -329,6 +339,9 @@ ser criados/copiados à parte (não são versionados).
   Resposta cai no texto achatado de sempre.
 - O banco é local (SQLite, um usuário por vez); a senha do Administrador é texto
   puro no disco (ver [Perfis e senha](#perfis-e-senha-do-administrador)).
+- A consulta de CNPJ depende de internet e de um serviço público de terceiros
+  (BrasilAPI), sem garantia de disponibilidade; sem ela, o CNAE da Receita fica
+  "não consultado" até uma nova consulta.
 
 ## 12. Desenvolvimento futuro
 O único item planejado é a **criação de um executável em binário** da
