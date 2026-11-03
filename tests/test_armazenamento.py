@@ -421,16 +421,18 @@ def test_persistir_lote_registra_as_importacoes_sem_mudar_o_retorno(tmp_path):
     assert linha['importado_em'] and linha['versao_app']
 
 
-def test_schema_sobe_para_a_versao_2_e_banco_v1_e_migrado(tmp_path):
+def test_schema_sobe_para_a_versao_atual_e_banco_v1_e_migrado(tmp_path):
     conn = armazenamento.conectar(str(tmp_path / "v1.db"))
     armazenamento.criar_esquema(conn)
     conn.execute("DROP TABLE historico")
     conn.execute("DROP TABLE importacoes")
+    conn.execute("DROP TABLE ajustes")
+    conn.execute("DROP TABLE chaves_substituidas")
     conn.execute("PRAGMA user_version = 1")
     conn.commit()
 
     armazenamento.criar_esquema(conn)
 
-    assert armazenamento.versao_do_schema(conn) == 2
+    assert armazenamento.versao_do_schema(conn) == armazenamento.SCHEMA_VERSAO
     conn.execute("SELECT COUNT(*) FROM historico")
     conn.execute("SELECT COUNT(*) FROM importacoes")

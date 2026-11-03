@@ -39,7 +39,7 @@ def _select(colunas) -> str:
     return '*' if not colunas else ', '.join(f'"{c}"' for c in colunas)
 
 
-SCHEMA_VERSAO = 2
+SCHEMA_VERSAO = 3
 
 _DDL_HISTORICO = """
 CREATE TABLE IF NOT EXISTS historico (
@@ -49,7 +49,26 @@ CREATE TABLE IF NOT EXISTS historico (
     registro_anterior TEXT NOT NULL,
     campos_alterados TEXT NOT NULL,
     alterado_em TEXT NOT NULL,
-    versao_app TEXT NOT NULL
+    versao_app TEXT NOT NULL,
+    origem TEXT NOT NULL DEFAULT 'importacao'
+)"""
+# campos que o administrador ajustou à mão num ato (a reimportação não os sobrescreve sem confirmação)
+_DDL_AJUSTES = """
+CREATE TABLE IF NOT EXISTS ajustes (
+    tabela TEXT NOT NULL,
+    chave TEXT NOT NULL,
+    campos TEXT NOT NULL,
+    atualizado_em TEXT NOT NULL,
+    PRIMARY KEY (tabela, chave)
+)"""
+# chave antiga -> chave nova, quando o administrador corrigiu a chave de um ato
+_DDL_SUBSTITUICOES = """
+CREATE TABLE IF NOT EXISTS chaves_substituidas (
+    tabela TEXT NOT NULL,
+    chave_antiga TEXT NOT NULL,
+    chave_nova TEXT NOT NULL,
+    trocada_em TEXT NOT NULL,
+    PRIMARY KEY (tabela, chave_antiga)
 )"""
 _DDL_IMPORTACOES = """
 CREATE TABLE IF NOT EXISTS importacoes (
@@ -112,15 +131,90 @@ def sessao(caminho_bd: str | None = None):
         yield conn
 
 
-def _guarda_historico(conn, tabela, chave, valores_chave, anterior, alterados):
+def _chave_json(chave: list, valores) -> str:
+    """A chave natural como JSON estável (usada em historico, ajustes e chaves_substituidas)."""
+    return json.dumps(dict(zip(chave, valores)), ensure_ascii=False, sort_keys=True)
+
+
+def registrar_alteracao(conn, tabela, chave, valores_chave, anterior, alterados,
+                        origem='importacao'):
+    """Guarda a linha ANTERIOR de um ato em `historico`. `origem`: 'importacao'
+    (reimportação do PDF) ou 'manual' (edição do administrador). Não faz commit."""
     conn.execute(
         'INSERT INTO historico (tabela, chave, registro_anterior, '
-        'campos_alterados, alterado_em, versao_app) VALUES (?, ?, ?, ?, ?, ?)',
-        (tabela,
-         json.dumps(dict(zip(chave, valores_chave)), ensure_ascii=False, sort_keys=True),
+        'campos_alterados, alterado_em, versao_app, origem) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        (tabela, _chave_json(chave, valores_chave),
          json.dumps(dict(anterior), ensure_ascii=False),
          json.dumps(alterados, ensure_ascii=False),
-         _agora(), VERSAO_APP))
+         _agora(), VERSAO_APP, origem))
+
+
+def ajustes_de(conn, tabela, chave, valores_chave) -> list:
+    """Campos que o administrador ajustou à mão neste ato (ordem alfabética)."""
+    linha = conn.execute('SELECT campos FROM ajustes WHERE tabela = ? AND chave = ?',
+                         (tabela, _chave_json(chave, valores_chave))).fetchone()
+    return json.loads(linha['campos']) if linha else []
+
+
+def juntar_ajustes(conn, tabela, chave, valores_chave, campos) -> None:
+    """Acrescenta `campos` aos ajustes do ato (união, sem repetir). Não faz commit."""
+    uniao = sorted(set(ajustes_de(conn, tabela, chave, valores_chave)) | set(campos))
+    if not uniao:
+        return
+    conn.execute(
+        'INSERT OR REPLACE INTO ajustes (tabela, chave, campos, atualizado_em) '
+        'VALUES (?, ?, ?, ?)',
+        (tabela, _chave_json(chave, valores_chave),
+         json.dumps(uniao, ensure_ascii=False), _agora()))
+
+
+def limpar_ajustes(conn, tabela, chave, valores_chave) -> None:
+    conn.execute('DELETE FROM ajustes WHERE tabela = ? AND chave = ?',
+                 (tabela, _chave_json(chave, valores_chave)))
+
+
+def resolver_chave(conn, tabela, chave, valores_chave) -> tuple:
+    """Chave ATUAL do ato: se a chave recebida foi trocada por uma edição, devolve
+    a nova; senão, a mesma. É assim que reimportar o PDF original cai no ato já
+    corrigido, em vez de criar um duplicado."""
+    atual, vistos = tuple(valores_chave), set()
+    while atual not in vistos:
+        vistos.add(atual)
+        linha = conn.execute(
+            'SELECT chave_nova FROM chaves_substituidas WHERE tabela = ? AND chave_antiga = ?',
+            (tabela, _chave_json(chave, atual))).fetchone()
+        if linha is None:
+            break
+        nova = json.loads(linha['chave_nova'])
+        atual = tuple(nova[c] for c in chave)
+    return atual
+
+
+def registrar_substituicao(conn, tabela, chave, antiga, nova) -> None:
+    """Anota que `antiga` agora é `nova`. Mantém as cadeias achatadas (A->B depois
+    B->C vira A->C e B->C) e apaga o apelido de uma chave que voltou a ser real
+    (C->A apaga A->C). Não faz commit."""
+    ja, jn = _chave_json(chave, antiga), _chave_json(chave, nova)
+    if ja == jn:
+        return
+    conn.execute('DELETE FROM chaves_substituidas WHERE tabela = ? AND chave_antiga = ?',
+                 (tabela, jn))
+    conn.execute('UPDATE chaves_substituidas SET chave_nova = ? '
+                 'WHERE tabela = ? AND chave_nova = ?', (jn, tabela, ja))
+    conn.execute(
+        'INSERT OR REPLACE INTO chaves_substituidas (tabela, chave_antiga, chave_nova, '
+        'trocada_em) VALUES (?, ?, ?, ?)', (tabela, ja, jn, _agora()))
+
+
+def mover_chave_auxiliares(conn, tabela, chave, antiga, nova) -> None:
+    """Depois de trocar a chave de um ato, leva o histórico e os ajustes para a
+    chave nova. Não faz commit."""
+    ja, jn = _chave_json(chave, antiga), _chave_json(chave, nova)
+    conn.execute('UPDATE historico SET chave = ? WHERE tabela = ? AND chave = ?',
+                 (jn, tabela, ja))
+    conn.execute('DELETE FROM ajustes WHERE tabela = ? AND chave = ?', (tabela, jn))
+    conn.execute('UPDATE ajustes SET chave = ? WHERE tabela = ? AND chave = ?',
+                 (jn, tabela, ja))
 
 
 def _upsert(conn: sqlite3.Connection, tabela: str, colunas: list,
@@ -150,8 +244,8 @@ def _upsert(conn: sqlite3.Connection, tabela: str, colunas: list,
             alterados = [c for c in colunas if c not in chave
                          and str(anterior[c] or '') != str(reg.get(c, '') or '')]
             if alterados:
-                _guarda_historico(conn, tabela, chave, chave_valores,
-                                  anterior, alterados)
+                registrar_alteracao(conn, tabela, chave, chave_valores,
+                                    anterior, alterados)
         conn.execute(upsert_sql, tuple(reg.get(c, '') for c in colunas))
         novos += anterior is None
         atualizados += anterior is not None
@@ -166,6 +260,7 @@ def historico_de(conn: sqlite3.Connection, tabela: str, chave: dict) -> list:
         'SELECT * FROM historico WHERE tabela = ? AND chave = ? ORDER BY id DESC',
         (tabela, json.dumps(chave, ensure_ascii=False, sort_keys=True))).fetchall()
     return [{'alterado_em': l['alterado_em'], 'versao_app': l['versao_app'],
+             'origem': l['origem'],
              'campos_alterados': json.loads(l['campos_alterados']),
              'registro_anterior': json.loads(l['registro_anterior'])}
             for l in linhas]
@@ -223,7 +318,11 @@ def criar_esquema(conn: sqlite3.Connection) -> None:
     _criar_tabela(conn, 'consultas', COLUNAS_CONSULTAS, CHAVE_CONSULTAS)
     _criar_tabela(conn, 'regimes', COLUNAS_REGIMES, CHAVE_REGIMES)
     conn.execute(_DDL_HISTORICO)
+    if 'origem' not in _colunas_existentes(conn, 'historico'):  # banco do schema 2
+        conn.execute("ALTER TABLE historico ADD COLUMN origem TEXT NOT NULL DEFAULT 'importacao'")
     conn.execute(_DDL_IMPORTACOES)
+    conn.execute(_DDL_AJUSTES)
+    conn.execute(_DDL_SUBSTITUICOES)
     if atual != SCHEMA_VERSAO:
         conn.execute(f'PRAGMA user_version = {SCHEMA_VERSAO}')
     conn.commit()
