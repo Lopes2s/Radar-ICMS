@@ -16,6 +16,7 @@ Sem Streamlit; sem dependência de terceiros (só `urllib`).
 """
 import http.client
 import json
+import logging
 import os
 import time
 import urllib.error
@@ -24,6 +25,7 @@ from datetime import datetime, timedelta, timezone
 
 from core import armazenamento
 from core.diagnostico import cnpj_valido
+from core.pipeline import CHAVE_REGIMES
 
 URL = 'https://brasilapi.com.br/api/cnpj/v1/{cnpj}'
 TIMEOUT = 5              # segundos por consulta
@@ -127,37 +129,55 @@ def atualizar(conn, cnpjs, abrir=None, agora=None, dormir=time.sleep, forcar=Fal
         if not cnpj_valido(digitos):
             resumo['ignorados'] += 1
             continue
-        guardado = armazenamento.cnpj_receita_de(conn, digitos)
-        if not forcar and guardado and _recente(guardado['consultado_em'], agora):
-            resumo['do_cache'] += 1
-            continue
-        if resumo['interrompido']:
-            resumo['pendentes'] += 1
-            continue
-        if ja_consultou:
-            dormir(PAUSA)
-        ja_consultou = True
         try:
-            dados = consultar(digitos, abrir)
-        except ConsultaIndisponivel as erro:
-            resumo['falhas'].append((digitos, str(erro)))
+            guardado = armazenamento.cnpj_receita_de(conn, digitos)
+            if not forcar and guardado and _recente(guardado['consultado_em'], agora):
+                resumo['do_cache'] += 1
+                continue
+            if resumo['interrompido']:
+                resumo['pendentes'] += 1
+                continue
+            if ja_consultou:
+                dormir(PAUSA)
+            ja_consultou = True
+            try:
+                dados = consultar(digitos, abrir)
+            except ConsultaIndisponivel as erro:
+                resumo['falhas'].append((digitos, str(erro)))
+                seguidas += 1
+                resumo['interrompido'] = seguidas >= MAX_FALHAS_SEGUIDAS
+                continue
+            except (CnpjNaoEncontrado, CnpjInvalido) as erro:
+                resumo['falhas'].append((digitos, str(erro)))
+                seguidas = 0
+                continue
+            seguidas = 0
+            armazenamento.salvar_cnpj_receita(
+                conn, dados, consultado_em=agora.isoformat(timespec='seconds'))
+            resumo['consultados'] += 1
+        except Exception as erro:   # a gravação já foi feita: nada aqui pode escapar
+            logging.getLogger('mapeador').exception('Erro inesperado ao consultar o CNPJ %s', digitos)
+            resumo['falhas'].append(
+                (digitos, f'erro inesperado ({type(erro).__name__}: {erro})'))
             seguidas += 1
             resumo['interrompido'] = seguidas >= MAX_FALHAS_SEGUIDAS
-            continue
-        except (CnpjNaoEncontrado, CnpjInvalido) as erro:
-            resumo['falhas'].append((digitos, str(erro)))
-            seguidas = 0
-            continue
-        seguidas = 0
-        armazenamento.salvar_cnpj_receita(conn, dados,
-                                          consultado_em=agora.isoformat(timespec='seconds'))
-        resumo['consultados'] += 1
     return resumo
 
 
 def atualizar_do_lote(conn, lote, **opcoes) -> dict:
-    """`atualizar` para os CNPJs dos regimes do lote (as consultas não têm CNPJ)."""
-    return atualizar(conn, [r.get('CNPJ REQUERENTE', '') for r in lote.regimes], **opcoes)
+    """`atualizar` para os CNPJs dos regimes do lote (as consultas não têm CNPJ).
+
+    Usa o CNPJ que o ato tem AGORA: se o administrador corrigiu a chave do regime,
+    o CNPJ do PDF é só um apelido (`chaves_substituidas`) e vale o corrigido."""
+    return atualizar(conn, [_cnpj_atual(conn, r) for r in lote.regimes], **opcoes)
+
+
+def _cnpj_atual(conn, regime) -> str:
+    chave = tuple(regime.get(c, '') for c in CHAVE_REGIMES)
+    try:
+        return armazenamento.resolver_chave(conn, 'regimes', CHAVE_REGIMES, chave)[-1]
+    except Exception:   # sem a resolução, vale o CNPJ do PDF
+        return chave[-1]
 
 
 def mensagem_do_resumo(resumo) -> str | None:

@@ -118,6 +118,16 @@ def test_falha_de_rede_nao_impede_a_gravacao(tmp_path, monkeypatch):
     assert len(ex.resumo_cnpj['falhas']) == 1 and ex.resumo_cnpj['consultados'] == 0
 
 
+def test_erro_inesperado_na_consulta_nao_impede_a_gravacao(tmp_path, monkeypatch):
+    monkeypatch.setenv('MAPEADOR_CONSULTA_CNPJ', '1')
+    ex = _execucao_com_regime(abrir_cnpj=Rede(erro=ValueError('boom')))
+    with armazenamento.sessao(str(tmp_path / 'g.db')) as conn:
+        resultado = ex.gravar(conn)
+        assert len(armazenamento.buscar_regimes(conn)) == 1
+    assert set(resultado) == {'consultas', 'regimes'}
+    assert ex.resumo_cnpj['falhas'][0][1].startswith('erro inesperado')
+
+
 @pytest.mark.parametrize('consultar_cnpj,variavel', [(False, '1'), (True, '0')])
 def test_consulta_desligada_nao_chama_a_rede(tmp_path, monkeypatch, consultar_cnpj, variavel):
     monkeypatch.setenv('MAPEADOR_CONSULTA_CNPJ', variavel)
