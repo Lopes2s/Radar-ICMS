@@ -682,3 +682,101 @@ def test_cancelar_a_edicao_volta_ao_detalhe():
     assert not at.exception
     assert "editar-registro" in {b.key for b in at.button}
     assert _regimes_no_banco()[0]['EMENTA'] == 'ementa original'
+
+
+def _analise_com(lote):
+    conn = _banco_do_teste()
+    try:
+        conflitos = edicao.ajustes_em_conflito(conn, lote)
+    finally:
+        conn.close()
+    return {"lote": lote, "diagnostico": diagnostico.diagnosticar(lote), "conflitos": conflitos}
+
+
+def _lote_sem_vigencia():
+    lote = pipeline.Lote(
+        regimes=[dict(REGIME)],
+        arquivos=[{'Arquivo': 'r.pdf', 'Tipo': 'regime', 'Consultas': 0, 'Regimes': 1,
+                   'Descartes': 0, 'Erro': ''}])
+    lote.origem[('regime', REGIME['Nº DO REGIME ESPECIAL'], REGIME['CNPJ REQUERENTE'])] = 'r.pdf'
+    return lote
+
+
+def test_na_analise_o_admin_corrige_um_campo_e_o_aviso_some():
+    at = _app("admin")
+    at.session_state["analise"] = _analise_com(_lote_sem_vigencia())
+    at.run(timeout=30)
+    assert any("A303" in w.value for w in at.warning)                # vigência vazia avisada
+    at.text_input(key=f"{PREFIXO}|VIGÊNCIA DO RE").input("12 meses")
+    at.button(key=f"{PREFIXO}|enviar").click().run(timeout=30)
+    assert not at.exception
+    analise = at.session_state["analise"]
+    assert analise["lote"].regimes[0]['VIGÊNCIA DO RE'] == '12 meses'
+    assert not any("A303" in w.value for w in at.warning)            # diagnóstico refeito
+    assert analise["lote"].ajustados == {
+        ('regime', '9.053/2026', '11.222.333/0001-81'): {'VIGÊNCIA DO RE'}}
+    assert _regimes_no_banco() == []                                 # nada foi gravado ainda
+
+
+def test_gravar_depois_de_ajustar_na_analise_protege_o_ajuste_na_reimportacao():
+    at = _app("admin")
+    at.session_state["analise"] = _analise_com(_lote_sem_vigencia())
+    at.run(timeout=30)
+    at.text_input(key=f"{PREFIXO}|VIGÊNCIA DO RE").input("12 meses")
+    at.button(key=f"{PREFIXO}|enviar").click().run(timeout=30)
+    at.button(key="gravar").click().run(timeout=30)
+    assert not at.exception
+    assert _regimes_no_banco()[0]['VIGÊNCIA DO RE'] == '12 meses'
+    # reimportar o PDF original (sem vigência) não desfaz o ajuste
+    conn = _banco_do_teste()
+    armazenamento.salvar_regimes(conn, [dict(REGIME)])
+    conn.close()
+    assert _regimes_no_banco()[0]['VIGÊNCIA DO RE'] == '12 meses'
+
+
+def test_na_analise_chave_repetida_mostra_o_erro():
+    lote = _lote_sem_vigencia()
+    lote.regimes.append({**REGIME, 'Nº DO REGIME ESPECIAL': '1/2026', 'EMPRESA': 'Outra'})
+    at = _app("admin")
+    at.session_state["analise"] = _analise_com(lote)
+    at.run(timeout=30)
+    at.text_input(key=f"{PREFIXO}|Nº DO REGIME ESPECIAL").input("1/2026")
+    at.button(key=f"{PREFIXO}|enviar").click().run(timeout=30)
+    assert not at.exception
+    assert any("Outro ato desta análise já usa essa chave" in e.value for e in at.error)
+    assert at.session_state["analise"]["lote"].regimes[0]['Nº DO REGIME ESPECIAL'] == '9.053/2026'
+
+
+def _caixa(at, tipo="regime", chave=(REGIME['Nº DO REGIME ESPECIAL'], REGIME['CNPJ REQUERENTE'])):
+    return at.checkbox(key="sobrescrever|" + "|".join([tipo, *chave]))
+
+
+def _banco_com_vigencia_ajustada():
+    conn = _banco_do_teste()
+    armazenamento.salvar_regimes(conn, [dict(REGIME)])
+    edicao.editar_registro(conn, 'regime', {c: REGIME[c] for c in pipeline.CHAVE_REGIMES},
+                           {'VIGÊNCIA DO RE': '12 meses'})
+    conn.close()
+
+
+def test_conflito_de_ajuste_aparece_desmarcado_e_gravar_mantem_o_ajuste():
+    _banco_com_vigencia_ajustada()
+    at = _app("admin")
+    at.session_state["analise"] = _analise_com(_lote_sem_vigencia())    # o PDF traz vigência vazia
+    at.run(timeout=30)
+    assert any("já têm ajuste manual" in w.value for w in at.warning)
+    assert _caixa(at).value is False
+    at.button(key="gravar").click().run(timeout=30)
+    assert not at.exception
+    assert _regimes_no_banco()[0]['VIGÊNCIA DO RE'] == '12 meses'
+
+
+def test_marcar_sobrescrever_grava_o_valor_do_pdf():
+    _banco_com_vigencia_ajustada()
+    at = _app("admin")
+    at.session_state["analise"] = _analise_com(_lote_sem_vigencia())
+    at.run(timeout=30)
+    _caixa(at).check().run(timeout=30)
+    at.button(key="gravar").click().run(timeout=30)
+    assert not at.exception
+    assert _regimes_no_banco()[0]['VIGÊNCIA DO RE'] == ''

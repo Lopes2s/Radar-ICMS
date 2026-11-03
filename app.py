@@ -14,7 +14,7 @@ garantir_dependencias(DEPS_APP)
 
 import streamlit as st  # noqa: E402
 
-from core import acesso, armazenamento, consulta, edicao, log, planilha  # noqa: E402
+from core import acesso, armazenamento, consulta, diagnostico, edicao, log, planilha  # noqa: E402
 from core.execucao import Execucao  # noqa: E402
 from core.pdf_text import MARCA_CITACAO  # noqa: E402
 from interface import design, formularios  # noqa: E402
@@ -40,10 +40,10 @@ st.set_page_config(page_title="Mapeador Tributário PR", page_icon="⚖️",
                    layout="wide")
 design.injetar_tema()
 
-def _persistir(lote):
+def _persistir(lote, sobrescrever=()):
     """Grava o lote no banco e devolve o resumo de novos/atualizados."""
     with armazenamento.sessao(_CAMINHO_BANCO) as conn:
-        return armazenamento.persistir_lote(conn, lote)
+        return armazenamento.persistir_lote(conn, lote, sobrescrever)
 
 
 def _data_br(iso) -> str:
@@ -203,6 +203,18 @@ def _mostra_detalhe(tipo: str, registro: dict, colunas: list, historico=(),
                             f"campos alterados: {', '.join(h['campos_alterados'])}")
 
 
+def _conflitos_com_o_banco(lote) -> list:
+    """Atos desta análise que já têm ajuste manual no banco e divergem do PDF."""
+    with armazenamento.sessao(_CAMINHO_BANCO) as conn:
+        return edicao.ajustes_em_conflito(conn, lote)
+
+
+def _reanalisar(analise):
+    """Refaz o diagnóstico e os conflitos depois de uma edição na análise."""
+    analise["diagnostico"] = diagnostico.diagnosticar(analise["lote"])
+    analise["conflitos"] = _conflitos_com_o_banco(analise["lote"])
+
+
 def _analisar(enviados, forcar, criterio):
     """Lê os PDFs e diagnostica, SEM gravar. Devolve o que a sessão guarda
     até o usuário decidir gravar."""
@@ -227,15 +239,26 @@ def _analisar(enviados, forcar, criterio):
         for caminho in temporarios:
             os.unlink(caminho)
         barra.empty()
-    return {"lote": lote, "diagnostico": execucao.diagnostico}
+    return {"lote": lote, "diagnostico": execucao.diagnostico,
+            "conflitos": _conflitos_com_o_banco(lote)}
 
 
-def _gravar(analise):
+def _chave_da_caixa(item: dict) -> str:
+    return "sobrescrever|" + "|".join(str(v) for v in edicao.chave_do_item(item))
+
+
+def _sobrescrever_marcados(analise) -> list:
+    """Atos com ajuste manual cujo PDF o administrador mandou sobrescrever."""
+    return [edicao.chave_do_item(i) for i in analise.get("conflitos", [])
+            if st.session_state.get(_chave_da_caixa(i))]
+
+
+def _gravar(analise, sobrescrever=()):
     """Persiste o lote analisado e devolve o resultado a guardar na sessão
     (mesmas chaves de sempre)."""
     acesso.exige_admin(st.session_state.get("perfil"))
     lote = analise["lote"]
-    mapeamento = _persistir(lote)
+    mapeamento = _persistir(lote, sobrescrever)
 
     # planilha em memória, exportação opcional: nada de cópia em disco
     buf = io.BytesIO()
@@ -244,6 +267,65 @@ def _gravar(analise):
     return {"arquivos": lote.arquivos, "consultas": lote.consultas,
             "regimes": lote.regimes, "descartes": lote.descartes,
             "mapeamento": mapeamento, "xlsx": buf.getvalue()}
+
+
+def _atos_da_analise(lote) -> list:
+    """[(rótulo, tipo, chave_dict)] de todos os atos da análise (mesmos rótulos do diagnóstico)."""
+    atos = []
+    for tipo, registros in (("consulta", lote.consultas), ("regime", lote.regimes)):
+        chave = edicao.TIPOS[tipo][2]
+        for reg in registros:
+            chave_dict = {c: reg.get(c, "") for c in chave}
+            rotulo = edicao.rotulo_do_ato(tipo, chave_dict)
+            if tipo == "regime" and reg.get("EMPRESA"):
+                rotulo += f" — {reg['EMPRESA']}"
+            atos.append((rotulo, tipo, chave_dict))
+    return atos
+
+
+def _editor_da_analise(analise):
+    """Corrige um ato ANTES de gravar (nada vai ao banco ainda)."""
+    lote = analise["lote"]
+    atos = _atos_da_analise(lote)
+    if not atos:
+        return
+    with st.expander("Ajustar um ato antes de gravar"):
+        st.caption("Escolha o ato apontado nos avisos, corrija os campos e salve. "
+                   "O diagnóstico é refeito na hora; a gravação continua sendo um passo à parte.")
+        i = st.selectbox("Ato", range(len(atos)), format_func=lambda n: atos[n][0],
+                         key="ajuste-escolha")
+        _, tipo, chave_atual = atos[i]
+        _, colunas, chave = edicao.TIPOS[tipo]
+        registro = next(r for r in (lote.consultas if tipo == "consulta" else lote.regimes)
+                        if all(str(r.get(c, "")) == str(chave_atual[c]) for c in chave))
+        novos = formularios.formulario_registro(
+            tipo, registro, colunas, chave,
+            prefixo=formularios.prefixo_de(tipo, [chave_atual[c] for c in chave]),
+            rotulo_envio="Salvar ajuste")
+        if novos is not None:
+            try:
+                r = edicao.ajustar_no_lote(lote, tipo, chave_atual, novos)
+            except (edicao.ChaveEmConflito, edicao.ChaveVazia, edicao.RegistroInexistente) as erro:
+                st.error(str(erro))
+            else:
+                _reanalisar(analise)
+                _avisar(r, "Ajuste feito na análise")
+                st.rerun()
+
+
+def _escolha_de_conflitos(analise):
+    """Atos que já têm ajuste manual no banco: por padrão o ajuste é mantido."""
+    conflitos = analise.get("conflitos") or []
+    if not conflitos:
+        return
+    st.warning(f"{len(conflitos)} ato(s) já têm ajuste manual e o PDF traz outro valor. "
+               "Por padrão o valor ajustado é mantido; marque para gravar o valor do PDF.")
+    for item in conflitos:
+        with st.container(border=True):
+            st.checkbox(f"Sobrescrever com o PDF — {item['rotulo']}", key=_chave_da_caixa(item))
+            st.dataframe(
+                [{"Campo": c["campo"], "Valor ajustado": c["atual"], "Valor do PDF": c["pdf"]}
+                 for c in item["campos"]], width="stretch", hide_index=True)
 
 
 def _mostra_analise(analise):
@@ -266,6 +348,8 @@ def _mostra_analise(analise):
             (st.warning if m["nivel"] == "aviso" else st.error)(aviso)
         if not diag["pode_continuar"]:
             st.info("Não há nenhum registro para gravar.")
+        _editor_da_analise(analise)
+        _escolha_de_conflitos(analise)
 
 
 def _mostra_resumo(resultado):
@@ -450,7 +534,7 @@ if aba_processar is not None:
             if st.button("Gravar no banco", type="primary", key="gravar",
                          icon=":material/save:",
                          disabled=not analise["diagnostico"]["pode_continuar"]):
-                st.session_state["resultado"] = _gravar(analise)
+                st.session_state["resultado"] = _gravar(analise, _sobrescrever_marcados(analise))
                 st.session_state.pop("analise", None)
                 st.rerun()
         elif resultado:
