@@ -300,7 +300,8 @@ def _editor_da_analise(analise):
                         if all(str(r.get(c, "")) == str(chave_atual[c]) for c in chave))
         novos = formularios.formulario_registro(
             tipo, registro, colunas, chave,
-            prefixo=formularios.prefixo_de(tipo, [chave_atual[c] for c in chave]),
+            prefixo=formularios.prefixo_de(tipo, [chave_atual[c] for c in chave],
+                                           contexto="analise"),
             rotulo_envio="Salvar ajuste")
         if novos is not None:
             try:

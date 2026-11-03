@@ -574,6 +574,9 @@ REGIME = {'ANO': '2026', 'DATA': '2026-03-01', 'Nº DO REGIME ESPECIAL': '9.053/
           'VIGÊNCIA DO RE': '', 'EMENTA': 'ementa original'}
 PREFIXO = formularios.prefixo_de('regime', [REGIME['Nº DO REGIME ESPECIAL'],
                                             REGIME['CNPJ REQUERENTE']])
+PREFIXO_ANALISE = formularios.prefixo_de('regime', [REGIME['Nº DO REGIME ESPECIAL'],
+                                                    REGIME['CNPJ REQUERENTE']],
+                                         contexto="analise")
 
 
 def _banco_do_teste():
@@ -707,8 +710,8 @@ def test_na_analise_o_admin_corrige_um_campo_e_o_aviso_some():
     at.session_state["analise"] = _analise_com(_lote_sem_vigencia())
     at.run(timeout=30)
     assert any("A303" in w.value for w in at.warning)                # vigência vazia avisada
-    at.text_input(key=f"{PREFIXO}|VIGÊNCIA DO RE").input("12 meses")
-    at.button(key=f"{PREFIXO}|enviar").click().run(timeout=30)
+    at.text_input(key=f"{PREFIXO_ANALISE}|VIGÊNCIA DO RE").input("12 meses")
+    at.button(key=f"{PREFIXO_ANALISE}|enviar").click().run(timeout=30)
     assert not at.exception
     analise = at.session_state["analise"]
     assert analise["lote"].regimes[0]['VIGÊNCIA DO RE'] == '12 meses'
@@ -722,8 +725,8 @@ def test_gravar_depois_de_ajustar_na_analise_protege_o_ajuste_na_reimportacao():
     at = _app("admin")
     at.session_state["analise"] = _analise_com(_lote_sem_vigencia())
     at.run(timeout=30)
-    at.text_input(key=f"{PREFIXO}|VIGÊNCIA DO RE").input("12 meses")
-    at.button(key=f"{PREFIXO}|enviar").click().run(timeout=30)
+    at.text_input(key=f"{PREFIXO_ANALISE}|VIGÊNCIA DO RE").input("12 meses")
+    at.button(key=f"{PREFIXO_ANALISE}|enviar").click().run(timeout=30)
     at.button(key="gravar").click().run(timeout=30)
     assert not at.exception
     assert _regimes_no_banco()[0]['VIGÊNCIA DO RE'] == '12 meses'
@@ -740,8 +743,8 @@ def test_na_analise_chave_repetida_mostra_o_erro():
     at = _app("admin")
     at.session_state["analise"] = _analise_com(lote)
     at.run(timeout=30)
-    at.text_input(key=f"{PREFIXO}|Nº DO REGIME ESPECIAL").input("1/2026")
-    at.button(key=f"{PREFIXO}|enviar").click().run(timeout=30)
+    at.text_input(key=f"{PREFIXO_ANALISE}|Nº DO REGIME ESPECIAL").input("1/2026")
+    at.button(key=f"{PREFIXO_ANALISE}|enviar").click().run(timeout=30)
     assert not at.exception
     assert any("Outro ato desta análise já usa essa chave" in e.value for e in at.error)
     assert at.session_state["analise"]["lote"].regimes[0]['Nº DO REGIME ESPECIAL'] == '9.053/2026'
@@ -780,3 +783,20 @@ def test_marcar_sobrescrever_grava_o_valor_do_pdf():
     at.button(key="gravar").click().run(timeout=30)
     assert not at.exception
     assert _regimes_no_banco()[0]['VIGÊNCIA DO RE'] == ''
+
+
+def test_editar_no_detalhe_de_ato_que_tambem_esta_na_analise_nao_duplica_chaves():
+    conn = _banco_do_teste()
+    armazenamento.salvar_regimes(conn, [dict(REGIME)])
+    conn.close()
+    at = _app("admin")
+    at.session_state["analise"] = _analise_com(_lote_sem_vigencia())
+    at.run(timeout=30)
+    at.tabs[1].selectbox[0].set_value("regime").run(timeout=30)
+    _linha_0(at)
+    at.run(timeout=30)
+    _linha_0(at)
+    at.button(key="editar-registro").click().run(timeout=30)
+    assert not at.exception
+    assert at.text_input(key=f"{PREFIXO}|EMPRESA").value == "Alfa Ltda"
+    assert at.text_input(key=f"{PREFIXO_ANALISE}|EMPRESA").value == "Alfa Ltda"

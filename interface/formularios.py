@@ -14,10 +14,11 @@ CAMPOS_LONGOS = {
 _LIMITE_CAMPO_CURTO = 80   # valor maior que isso também vira área de texto
 
 
-def prefixo_de(tipo: str, valores_chave) -> str:
+def prefixo_de(tipo: str, valores_chave, contexto: str = "edit") -> str:
     """Prefixo único (por ato) das chaves dos widgets do formulário, para o Streamlit
-    não reaproveitar o texto digitado de um ato em outro."""
-    return "|".join(["edit", tipo, *(str(v) for v in valores_chave)])
+    não reaproveitar o texto digitado de um ato em outro. `contexto` separa formulários
+    do mesmo ato que podem estar na tela juntos (detalhe 'edit' e análise 'analise')."""
+    return "|".join([contexto, tipo, *(str(v) for v in valores_chave)])
 
 
 def campo_longo(campo: str, valor: str) -> bool:

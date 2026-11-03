@@ -10,6 +10,11 @@ def test_prefixo_e_unico_por_ato():
     assert len({a, b, c}) == 3
 
 
+def test_prefixo_da_analise_tem_espaco_proprio():
+    assert (formularios.prefixo_de('regime', ['1', '2'], contexto="analise")
+            != formularios.prefixo_de('regime', ['1', '2']))
+
+
 def test_campos_de_texto_corrido_viram_area_de_texto():
     assert formularios.campo_longo('EMENTA', '')
     assert formularios.campo_longo('Resposta', 'curta')
