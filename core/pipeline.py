@@ -31,6 +31,10 @@ class Lote:
     importacoes: list = field(default_factory=list)
     # ('consulta', Ano, Nº) / ('regime', Nº RE, CNPJ) -> nome do 1º arquivo de origem
     origem: dict = field(default_factory=dict)
+    # edições feitas na ANÁLISE (antes de gravar): ('consulta'|'regime', *chave) -> campos
+    # ajustados (fora a chave), e as chaves corrigidas [(tipo, antiga, nova), ...]
+    ajustados: dict = field(default_factory=dict)
+    chaves_substituidas: list = field(default_factory=list)
 
 
 CRITERIOS_DEDUP = ('primeira', 'completo', 'recente')

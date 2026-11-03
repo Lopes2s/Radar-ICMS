@@ -416,6 +416,23 @@ def buscar_detalhe(conn: sqlite3.Connection, tabela: str, chave: list,
     return dict(linha) if linha else None
 
 
+_TABELA_E_CHAVE = {'consulta': ('consultas', CHAVE_CONSULTAS),
+                   'regime': ('regimes', CHAVE_REGIMES)}
+
+
+def _gravar_ajustes_do_lote(conn: sqlite3.Connection, lote: Lote) -> None:
+    """Leva para o banco o que o administrador ajustou na ANÁLISE: os campos
+    editados viram `ajustes` do ato e as chaves corrigidas viram apelidos."""
+    for (tipo, *valores), campos in lote.ajustados.items():
+        tabela, chave = _TABELA_E_CHAVE[tipo]
+        atual = resolver_chave(conn, tabela, chave, tuple(valores))
+        juntar_ajustes(conn, tabela, chave, atual, sorted(campos))
+    for tipo, antiga, nova in lote.chaves_substituidas:
+        tabela, chave = _TABELA_E_CHAVE[tipo]
+        registrar_substituicao(conn, tabela, chave, tuple(antiga), tuple(nova))
+    conn.commit()
+
+
 def persistir_lote(conn: sqlite3.Connection, lote: Lote, sobrescrever=()) -> dict:
     """Persiste um core.pipeline.Lote inteiro (consultas + regimes) de uma vez.
 
@@ -427,5 +444,6 @@ def persistir_lote(conn: sqlite3.Connection, lote: Lote, sobrescrever=()) -> dic
     resultado = {
         'consultas': salvar_consultas(conn, lote.consultas, por_tipo['consulta']),
         'regimes': salvar_regimes(conn, lote.regimes, por_tipo['regime'])}
+    _gravar_ajustes_do_lote(conn, lote)
     registrar_importacoes(conn, lote.importacoes)
     return resultado

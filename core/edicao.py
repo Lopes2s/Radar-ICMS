@@ -138,3 +138,44 @@ def ajustes_em_conflito(conn, lote) -> list:
                 itens.append({'tipo': tipo, 'chave': chave_dict, 'campos': campos,
                               'rotulo': rotulo_do_ato(tipo, chave_dict)})
     return itens
+
+
+def ajustar_no_lote(lote, tipo: str, chave_atual: dict, novos: dict) -> dict:
+    """Edita um ato que ainda está na ANÁLISE (só em memória). Mesmas regras de
+    `editar_registro`, sem tocar o banco: registra em `lote.ajustados` os campos
+    editados e em `lote.chaves_substituidas` a chave corrigida; `lote.origem` acompanha
+    a troca. O chamador refaz o diagnóstico depois."""
+    tabela, colunas, chave = _tipo(tipo)
+    _validar(colunas, novos)
+    registros = lote.consultas if tipo == 'consulta' else lote.regimes
+
+    def chave_de(reg):
+        return tuple(_texto(reg.get(c)) for c in chave)
+
+    procurada = tuple(_texto(chave_atual.get(c)) for c in chave)
+    alvo = next((r for r in registros if chave_de(r) == procurada), None)
+    if alvo is None:
+        raise RegistroInexistente(f"Não há ato com a chave {chave_atual!r} nesta análise.")
+    final = {c: (_limpo(novos[c]) if c in novos else _texto(alvo.get(c))) for c in colunas}
+    alterados = [c for c in colunas if _texto(alvo.get(c)) != final[c]]
+    if not alterados:
+        return {'alterados': [], 'chave_trocada': False}
+
+    nova = tuple(final[c] for c in chave)
+    if not all(nova):
+        raise ChaveVazia("O número e os demais campos da chave não podem ficar em branco.")
+    trocada = nova != procurada
+    if trocada and any(chave_de(r) == nova for r in registros if r is not alvo):
+        raise ChaveEmConflito("Outro ato desta análise já usa essa chave.")
+
+    alvo.update({c: final[c] for c in alterados})
+    campos = set(lote.ajustados.pop((tipo, *procurada), set()))
+    campos |= {c for c in alterados if c not in chave}
+    if campos:
+        lote.ajustados[(tipo, *nova)] = campos
+    if trocada:
+        arquivo = lote.origem.pop((tipo, *procurada), None)
+        if arquivo is not None:
+            lote.origem[(tipo, *nova)] = arquivo
+        lote.chaves_substituidas.append((tipo, procurada, nova))
+    return {'alterados': alterados, 'chave_trocada': trocada}

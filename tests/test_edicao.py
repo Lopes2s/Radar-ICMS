@@ -258,3 +258,63 @@ def test_conflito_usa_a_chave_atual_quando_o_pdf_traz_a_chave_antiga(tmp_path):
     assert len(itens) == 1
     assert itens[0]['chave']['CNPJ REQUERENTE'] == '11'
     assert itens[0]['campos'] == [{'campo': 'EMPRESA', 'atual': 'Corrigida', 'pdf': 'Alfa Ltda'}]
+
+
+# --- edição na análise (em memória) ----------------------------------------
+def _lote_com_regimes():
+    lote = pipeline.Lote(regimes=[_regime(), _regime(**{'Nº DO REGIME ESPECIAL': '2/2026'})])
+    lote.origem[('regime', '9.053/2026', '11.222.333/0001-81')] = 'a.pdf'
+    return lote
+
+
+def test_ajustar_campo_no_lote_altera_o_registro_e_anota_o_ajuste():
+    lote = _lote_com_regimes()
+    r = edicao.ajustar_no_lote(lote, 'regime', _chave_regime(), {'VIGÊNCIA DO RE': '12 meses'})
+    assert r == {'alterados': ['VIGÊNCIA DO RE'], 'chave_trocada': False}
+    assert lote.regimes[0]['VIGÊNCIA DO RE'] == '12 meses'
+    assert lote.ajustados == {('regime', '9.053/2026', '11.222.333/0001-81'): {'VIGÊNCIA DO RE'}}
+    assert lote.chaves_substituidas == []
+
+
+def test_ajustar_a_chave_no_lote_acompanha_origem_ajustes_e_apelidos():
+    lote = _lote_com_regimes()
+    edicao.ajustar_no_lote(lote, 'regime', _chave_regime(), {'EMENTA': 'x'})
+    r = edicao.ajustar_no_lote(lote, 'regime', _chave_regime(),
+                               {'CNPJ REQUERENTE': '99.999.999/0001-99'})
+    assert r['chave_trocada'] is True
+    nova = ('9.053/2026', '99.999.999/0001-99')
+    assert lote.regimes[0]['CNPJ REQUERENTE'] == '99.999.999/0001-99'
+    assert lote.origem[('regime', *nova)] == 'a.pdf'
+    assert ('regime', '9.053/2026', '11.222.333/0001-81') not in lote.origem
+    assert lote.ajustados == {('regime', *nova): {'EMENTA'}}              # o ajuste acompanhou a chave
+    assert lote.chaves_substituidas == [('regime', ('9.053/2026', '11.222.333/0001-81'), nova)]
+
+
+def test_ajustar_no_lote_recusa_chave_repetida_vazia_e_ato_inexistente():
+    lote = _lote_com_regimes()
+    with pytest.raises(edicao.ChaveEmConflito):
+        edicao.ajustar_no_lote(lote, 'regime', _chave_regime(), {'Nº DO REGIME ESPECIAL': '2/2026',
+                                                                  'CNPJ REQUERENTE': '11.222.333/0001-81'})
+    with pytest.raises(edicao.ChaveVazia):
+        edicao.ajustar_no_lote(lote, 'regime', _chave_regime(), {'CNPJ REQUERENTE': ''})
+    with pytest.raises(edicao.RegistroInexistente):
+        edicao.ajustar_no_lote(lote, 'regime', {'Nº DO REGIME ESPECIAL': 'x', 'CNPJ REQUERENTE': 'y'}, {})
+    assert lote.regimes[0]['CNPJ REQUERENTE'] == '11.222.333/0001-81'      # nada mudou
+
+
+def test_gravar_o_lote_ajustado_cria_ajustes_e_apelidos_que_protegem_a_reimportacao(tmp_path):
+    conn = _conn(tmp_path)
+    lote = _lote_com_regimes()
+    edicao.ajustar_no_lote(lote, 'regime', _chave_regime(),
+                           {'VIGÊNCIA DO RE': '12 meses', 'CNPJ REQUERENTE': '55'})
+    armazenamento.persistir_lote(conn, lote)
+
+    nova = ('9.053/2026', '55')
+    assert armazenamento.ajustes_de(conn, 'regimes', CHAVE_R, nova) == ['VIGÊNCIA DO RE']
+    assert armazenamento.resolver_chave(conn, 'regimes', CHAVE_R,
+                                        ('9.053/2026', '11.222.333/0001-81')) == nova
+    # reimportar o PDF original (chave antiga, sem vigência) não desfaz o ajuste nem duplica
+    armazenamento.salvar_regimes(conn, [_regime(**{'VIGÊNCIA DO RE': ''})])
+    linhas = [r for r in armazenamento.buscar_regimes(conn) if r['Nº DO REGIME ESPECIAL'] == '9.053/2026']
+    assert len(linhas) == 1 and linhas[0]['CNPJ REQUERENTE'] == '55'
+    assert linhas[0]['VIGÊNCIA DO RE'] == '12 meses'
