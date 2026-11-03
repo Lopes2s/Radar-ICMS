@@ -20,7 +20,7 @@ def _consulta(**campos):
 # --- primitivas de armazenamento -------------------------------------------
 def test_esquema_3_tem_ajustes_substituicoes_e_origem_no_historico(tmp_path):
     conn = _conn(tmp_path)
-    assert armazenamento.SCHEMA_VERSAO == 3
+    assert armazenamento.SCHEMA_VERSAO >= 3
     conn.execute("SELECT COUNT(*) FROM ajustes")
     conn.execute("SELECT COUNT(*) FROM chaves_substituidas")
     assert 'origem' in armazenamento._colunas_existentes(conn, 'historico')
@@ -46,7 +46,7 @@ def test_banco_v2_migra_para_v3_preservando_o_historico(tmp_path):
 
     armazenamento.criar_esquema(conn)
 
-    assert armazenamento.versao_do_schema(conn) == 3
+    assert armazenamento.versao_do_schema(conn) == armazenamento.SCHEMA_VERSAO
     itens = armazenamento.historico_de(conn, 'consultas', {'Ano': '2026', 'Nº da Consulta': '001'})
     assert len(itens) == 1 and itens[0]['origem'] == 'importacao'
     conn.execute("SELECT COUNT(*) FROM ajustes")

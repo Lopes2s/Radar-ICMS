@@ -39,7 +39,7 @@ def _select(colunas) -> str:
     return '*' if not colunas else ', '.join(f'"{c}"' for c in colunas)
 
 
-SCHEMA_VERSAO = 3
+SCHEMA_VERSAO = 4
 
 _DDL_HISTORICO = """
 CREATE TABLE IF NOT EXISTS historico (
@@ -76,6 +76,18 @@ CREATE TABLE IF NOT EXISTS importacoes (
     arquivo TEXT, sha256 TEXT, tipo TEXT, n_registros INTEGER,
     importado_em TEXT NOT NULL,
     versao_app TEXT NOT NULL
+)"""
+
+
+# o que a Receita Federal (BrasilAPI) disse de cada CNPJ; à parte do regime (ver core/cnpj.py)
+_DDL_CNPJ_RECEITA = """
+CREATE TABLE IF NOT EXISTS cnpj_receita (
+    cnpj TEXT PRIMARY KEY,
+    razao_social TEXT NOT NULL DEFAULT '',
+    cnae_codigo TEXT NOT NULL DEFAULT '',
+    cnae_descricao TEXT NOT NULL DEFAULT '',
+    situacao TEXT NOT NULL DEFAULT '',
+    consultado_em TEXT NOT NULL
 )"""
 
 
@@ -333,6 +345,7 @@ def criar_esquema(conn: sqlite3.Connection) -> None:
     conn.execute(_DDL_IMPORTACOES)
     conn.execute(_DDL_AJUSTES)
     conn.execute(_DDL_SUBSTITUICOES)
+    conn.execute(_DDL_CNPJ_RECEITA)
     if atual != SCHEMA_VERSAO:
         conn.execute(f'PRAGMA user_version = {SCHEMA_VERSAO}')
     conn.commit()
@@ -447,3 +460,25 @@ def persistir_lote(conn: sqlite3.Connection, lote: Lote, sobrescrever=()) -> dic
     _gravar_ajustes_do_lote(conn, lote)
     registrar_importacoes(conn, lote.importacoes)
     return resultado
+
+
+def salvar_cnpj_receita(conn: sqlite3.Connection, dados: dict,
+                        consultado_em: str | None = None) -> None:
+    """Grava (ou substitui) a consulta de um CNPJ na Receita Federal.
+    `dados` vem de cnpj.consultar: {'cnpj' (só dígitos), 'razao_social',
+    'cnae_codigo', 'cnae_descricao', 'situacao'}."""
+    conn.execute(
+        'INSERT OR REPLACE INTO cnpj_receita '
+        '(cnpj, razao_social, cnae_codigo, cnae_descricao, situacao, consultado_em) '
+        'VALUES (?, ?, ?, ?, ?, ?)',
+        (dados['cnpj'], dados.get('razao_social', ''), dados.get('cnae_codigo', ''),
+         dados.get('cnae_descricao', ''), dados.get('situacao', ''),
+         consultado_em or _agora()))
+    conn.commit()
+
+
+def cnpj_receita_de(conn: sqlite3.Connection, cnpj) -> dict | None:
+    """Última consulta guardada do CNPJ (com ou sem pontuação), ou None."""
+    digitos = ''.join(c for c in str(cnpj or '') if c.isdigit())
+    linha = conn.execute('SELECT * FROM cnpj_receita WHERE cnpj = ?', (digitos,)).fetchone()
+    return dict(linha) if linha else None

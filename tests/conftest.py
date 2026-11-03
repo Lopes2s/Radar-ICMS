@@ -11,6 +11,9 @@ def _dados_isolados(monkeypatch, tmp_path_factory):
     handler aberto impede apagar a pasta temporária)."""
     pasta = tmp_path_factory.mktemp("dados")
     monkeypatch.setenv("MAPEADOR_DADOS", str(pasta))
+    # nenhum teste usa a rede: a consulta de CNPJ fica desligada, salvo nos testes
+    # que a ligam de propósito (sempre com um `abrir` falso)
+    monkeypatch.setenv("MAPEADOR_CONSULTA_CNPJ", "0")
     yield
     logger = logging.getLogger("mapeador")
     for handler in list(logger.handlers):
