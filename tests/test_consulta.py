@@ -135,3 +135,29 @@ def test_historico_do_registro_por_tipo(tmp_path):
         itens = consulta.historico(c, 'consulta', base)
         assert len(itens) == 1
         assert itens[0]['campos_alterados'] == ['Protocolo']
+
+
+def test_resumo_do_banco_vazio(tmp_path):
+    with armazenamento.sessao(str(tmp_path / "r.db")) as c:
+        assert consulta.resumo_do_banco(c) == {
+            'consultas': 0, 'regimes': 0, 'anos': [], 'ultima_importacao': None}
+
+
+def test_resumo_do_banco_conta_atos_une_anos_e_traz_a_ultima_importacao(tmp_path):
+    with armazenamento.sessao(str(tmp_path / "r.db")) as c:
+        armazenamento.salvar_consultas(c, [
+            {'Ano': '2025', 'Nº da Consulta': '001'},
+            {'Ano': '2026', 'Nº da Consulta': '002'},
+        ])
+        armazenamento.salvar_regimes(c, [
+            {'ANO': '2026', 'Nº DO REGIME ESPECIAL': '1/2026', 'CNPJ REQUERENTE': '11'},
+            {'ANO': '2024', 'Nº DO REGIME ESPECIAL': '2/2024', 'CNPJ REQUERENTE': '22'},
+            {'ANO': '', 'Nº DO REGIME ESPECIAL': '3/x', 'CNPJ REQUERENTE': '33'},
+        ])
+        armazenamento.registrar_importacoes(c, [
+            {'arquivo': 'a.pdf', 'sha256': 'x', 'tipo': 'consulta', 'n_registros': 2}])
+        resumo = consulta.resumo_do_banco(c)
+    assert resumo['consultas'] == 2
+    assert resumo['regimes'] == 3
+    assert resumo['anos'] == ['2024', '2025', '2026']   # união, sem repetir e sem vazio
+    assert resumo['ultima_importacao'][:4].isdigit()      # ISO UTC gravado pelo armazenamento

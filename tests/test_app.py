@@ -464,3 +464,53 @@ def test_analise_de_outros_arquivos_e_descartada():
     at.run(timeout=30)
     assert "analise" not in at.session_state
     assert not any(b.key == "gravar" for b in at.button)
+
+
+def _semeia(consultas=(), regimes=()):
+    conn = armazenamento.conectar(os.environ["MAPEADOR_BANCO"])
+    armazenamento.criar_esquema(conn)
+    armazenamento.salvar_consultas(conn, list(consultas))
+    armazenamento.salvar_regimes(conn, list(regimes))
+    conn.close()
+
+
+def test_pagina_injeta_o_tema_e_a_marca_martinelli():
+    at = _app().run(timeout=30)
+    assert not at.exception
+    textos = [m.value for m in at.markdown]
+    assert any("--primary: #1C62CB" in t and "<style>" in t for t in textos)
+    assert any("Martinelli Advogados" in t and "Mapeador Tribut" in t for t in textos)
+
+
+def test_consultar_mostra_os_indicadores_do_banco():
+    _semeia(
+        consultas=[{'Ano': '2025', 'Nº da Consulta': '001'}, {'Ano': '2026', 'Nº da Consulta': '002'}],
+        regimes=[{'ANO': '2026', 'Nº DO REGIME ESPECIAL': '1/2026', 'CNPJ REQUERENTE': '11'}],
+    )
+    at = _app().run(timeout=30)
+    assert not at.exception
+    valores = {m.label: m.value for m in at.metric}
+    assert valores["Consultas mapeadas"] == "2"
+    assert valores["Regimes mapeados"] == "1"
+    assert valores["Anos cobertos"] == "2025–2026"
+    assert valores["Última importação"] == "—"   # nada foi importado por PDF neste banco
+
+
+def test_banco_vazio_mostra_o_estado_vazio():
+    at = _app().run(timeout=30)
+    assert any("Ainda não há atos mapeados" in m.value for m in at.markdown)
+    assert len(at.dataframe) == 0   # sem atos, não há tabela
+
+
+def test_busca_sem_resultado_mostra_o_estado_vazio_de_filtro():
+    _semeia(consultas=[{'Ano': '2026', 'Nº da Consulta': '001', 'Súmula': 'ICMS'}])
+    at = _app().run(timeout=30)
+    at.tabs[1].text_input[0].input("termo-que-nao-existe").run(timeout=30)
+    assert not at.exception
+    assert any("Nenhum ato com esses filtros" in m.value for m in at.markdown)
+    assert not any("Baixar estes resultados" in b.label for b in at.tabs[1].download_button)
+
+
+def test_analisar_fica_desabilitado_sem_arquivos():
+    at = _app().run(timeout=30)
+    assert at.button(key="analisar").disabled is True

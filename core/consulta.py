@@ -79,3 +79,15 @@ def historico(conn, tipo: str, registro: dict) -> list:
         raise ValueError(f"tipo deve ser um de {TIPOS}: {tipo!r}")
     chave = {c: registro.get(c, '') for c in CHAVES[tipo]}
     return armazenamento.historico_de(conn, _TABELAS[tipo], chave)
+
+
+def resumo_do_banco(conn) -> dict:
+    """Números para os indicadores da tela de consulta: quantos atos há em cada
+    tabela, os anos cobertos (união das duas, sem vazios, em ordem) e a data da
+    última importação (ISO UTC, ou None se nunca houve)."""
+    n_consultas = conn.execute('SELECT COUNT(*) FROM consultas').fetchone()[0]
+    n_regimes = conn.execute('SELECT COUNT(*) FROM regimes').fetchone()[0]
+    anos = sorted({a for tipo in TIPOS for a in anos_disponiveis(conn, tipo) if a})
+    ultima = conn.execute('SELECT MAX(importado_em) FROM importacoes').fetchone()[0]
+    return {'consultas': n_consultas, 'regimes': n_regimes, 'anos': anos,
+            'ultima_importacao': ultima}

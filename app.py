@@ -1,10 +1,10 @@
 # app.py
-import base64
 import html
 import io
 import os
 import re
 import tempfile
+from datetime import datetime
 
 from core.bootstrap import DEPS_APP, garantir_dependencias
 
@@ -17,6 +17,7 @@ import streamlit as st  # noqa: E402
 from core import acesso, armazenamento, consulta, log, planilha  # noqa: E402
 from core.execucao import Execucao  # noqa: E402
 from core.pdf_text import MARCA_CITACAO  # noqa: E402
+from interface import design  # noqa: E402
 
 log.configurar_log(armazenamento.pasta_dados())
 
@@ -26,175 +27,41 @@ _FORCAR = {"Detectar automaticamente": None,
 _CRITERIOS = {"Primeira ocorrência": "primeira",
               "Mais completo": "completo",
               "Mais recente": "recente"}
+_PERFIS = {acesso.PERFIL_ADMIN: "Administrador",
+           acesso.PERFIL_CONSULTA: "Consulta"}
 
 # MAPEADOR_BANCO permite apontar para um banco de teste/alternativo; sem a
 # variável, cai no padrão de armazenamento.conectar() (mapeamento.db na raiz
 # do projeto).
 _CAMINHO_BANCO = os.environ.get("MAPEADOR_BANCO") or None
 
-# Identidade visual "ICMS Tech" (Martinelli Advogados) — ver manual de marca
-# "ICMS Tech — Conceito 1c". Cores/fonte/raio ficam em .streamlit/config.toml
-# (tema nativo do Streamlit); aqui só o que o config.toml não cobre: logo,
-# sombra dos cards e a cor de alerta da métrica de descartes.
-_ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
-_ICONE_ESCURO = os.path.join(_ASSETS, "icms_tech_icon_dark.png")   # squircle grafite — fundos claros
-_ICONE_CLARO = os.path.join(_ASSETS, "icms_tech_icon_light.png")   # squircle branco — fundos escuros
+# Visual: Design System Martinelli (interface/design.py + .streamlit/config.toml).
+st.set_page_config(page_title="Mapeador Tributário PR", page_icon="⚖️",
+                   layout="wide")
+_tema = design.injetar_tema()
 
-# Vermelho de alerta: não está no manual (sinalizado na entrega desta tarefa)
-# — usado só na métrica "Descartes registrados", que já representa pendência.
-_VERMELHO_ALERTA = "#C0362C"
-# Cor do endosso "MARTINELLI ADVOGADOS" amostrada do próprio lockup.png
-# (região abaixo do wordmark) — o manual não deu um hex para ela.
-_CINZA_ENDOSSO = "#6B7280"
-# Azul institucional — mesmo valor de .streamlit/config.toml (theme.primaryColor).
-# Repetido aqui porque o CSS injetado não lê o config.toml.
-_AZUL_INSTITUCIONAL = "#1C62CB"
-# Âmbar amostrado da tela de referência (busca de normas) enviada pelo
-# usuário, só para o texto "Total de atos localizados" na aba Consultar —
-# não faz parte do manual ICMS Tech.
-_AMBAR_TOTAL = "#A66C00"
-
-
-def _base64_png(caminho: str) -> str:
-    with open(caminho, "rb") as fh:
-        return base64.b64encode(fh.read()).decode("ascii")
-
-
-st.set_page_config(page_title="Mapeador Tributário PR", page_icon=_ICONE_ESCURO,
-                    layout="wide")
-
-# CSS injetado: contorno para o que .streamlit/config.toml não expõe
-# nativamente (sombra de card, cor condicional de métrica, o lockup
-# compacto da sidebar, que é HTML próprio porque não existe um PNG do
-# lockup já preparado para fundo escuro — só o ícone tem as duas versões).
-st.markdown(f"""
-<style>
-/* Cards brancos com leve elevação — manual: "cantos arredondados, sombra
-   suave". baseRadius do tema já arredonda; a sombra precisa de CSS porque
-   o tema do Streamlit não tem uma opção nativa para box-shadow. */
-div[class*="st-key-card-"] {{
-    box-shadow: 0 1px 3px rgba(38, 38, 38, 0.12);
-}}
-
-/* Métrica "Descartes registrados": vermelho de alerta em vez do grafite
-   padrão, porque semanticamente representa pendência/divergência — manual:
-   "quando o dado é um alerta ou divergência, o número usa a cor de alerta". */
-div[class*="st-key-metric-descartes"] [data-testid="stMetricValue"] {{
-    color: {_VERMELHO_ALERTA};
-}}
-
-/* Lockup compacto no topo da sidebar escura (ícone + wordmark + endosso).
-   HTML próprio, não o lockup.png: esse PNG foi montado para fundo claro
-   (ícone grafite, texto grafite) e ficaria ilegível sobre a sidebar escura
-   — por isso reconstruímos com o ícone claro (squircle branco) e o texto
-   em branco/cinza-claro, mesma tipografia do manual (Urbanist 700+300 no
-   wordmark, 600 com letter-spacing no endosso). */
-.icms-sidebar-logo {{
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    /* área de proteção mínima (manual: 1/4 da altura do ícone) nos dois
-       lados do bloco, para nada encostar no ícone nem no texto */
-    padding: 0.5rem 0.35rem 1rem 0.35rem;
-}}
-.icms-sidebar-logo img {{
-    height: 40px;
-    width: 40px;
-}}
-.icms-sidebar-logo .icms-textos {{
-    line-height: 1.05;
-}}
-.icms-sidebar-logo .icms-wordmark {{
-    font-family: 'Urbanist', 'Inter', 'Manrope', sans-serif;
-    font-size: 1.05rem;
-    color: #FFFFFF;
-}}
-.icms-sidebar-logo .icms-wordmark b {{
-    font-weight: 700;
-}}
-.icms-sidebar-logo .icms-wordmark span {{
-    font-weight: 300;
-}}
-.icms-sidebar-logo .icms-endosso {{
-    font-family: 'Urbanist', 'Inter', 'Manrope', sans-serif;
-    font-weight: 600;
-    font-size: 0.55rem;
-    letter-spacing: 0.22em;
-    color: {_CINZA_ENDOSSO};
-}}
-
-/* Painel de busca da aba Consultar, no estilo da tela de referência (busca
-   de normas): rótulos dos campos em azul institucional. Reusa o azul da
-   marca ICMS Tech (#1C62CB) em vez do azul-marinho da referência (#00205B)
-   — mantém uma única cor de destaque no app. Duas variantes de seletor
-   porque não confirmei em navegador qual delas o Streamlit 1.63 realmente
-   usa para o rótulo do widget (contorno, ver observações da entrega). */
-.st-key-painel-busca [data-testid="stWidgetLabel"] p,
-.st-key-painel-busca label {{
-    color: {_AZUL_INSTITUCIONAL};
-    font-weight: 600;
-}}
-
-/* Barra "RESULTADO DA PESQUISA" da tela de referência — mesma cor azul da
-   marca em vez do azul-marinho da imagem, pelo mesmo motivo acima. */
-.icms-resultado-barra {{
-    background: {_AZUL_INSTITUCIONAL};
-    color: #FFFFFF;
-    font-weight: 700;
-    text-align: center;
-    padding: 0.5rem 0;
-    border-radius: 0.4rem;
-    margin-bottom: 0.6rem;
-    letter-spacing: 0.04em;
-}}
-
-/* "Total de atos localizados: N" — cor âmbar amostrada da própria imagem de
-   referência enviada pelo usuário (não é uma cor do manual ICMS Tech; ver
-   decisões sinalizadas na entrega). */
-.icms-total-atos {{
-    color: {_AMBAR_TOTAL};
-    font-weight: 700;
-    margin-bottom: 0.5rem;
-}}
-
-/* Rótulo de cada campo no modal de detalhe de uma consulta/regime */
-.icms-campo-detalhe-rotulo {{
-    color: {_AZUL_INSTITUCIONAL};
-    font-weight: 700;
-    font-size: 0.8rem;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    margin-top: 0.9rem;
-}}
-
-.icms-resposta-paragrafo {{
-    margin: 0 0 0.9em 0;
-    line-height: 1.55;
-    text-align: justify;
-}}
-</style>
-""", unsafe_allow_html=True)
-
-# Sem cabeçalho principal: a única marca do app fica no lockup compacto da
-# sidebar (a pedido do usuário, ao restilizar a aba Consultar — antes havia
-# aqui o lockup horizontal + legenda).
 with st.sidebar:
-    st.markdown(f"""
-    <div class="icms-sidebar-logo">
-        <img src="data:image/png;base64,{_base64_png(_ICONE_CLARO)}" />
-        <div class="icms-textos">
-            <div class="icms-wordmark"><b>ICMS</b> <span>Tech</span></div>
-            <div class="icms-endosso">MARTINELLI ADVOGADOS</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    st.divider()
+    design.marca_lateral("Mapeador Tributário PR", _tema)
 
 
 def _persistir(lote):
     """Grava o lote no banco e devolve o resumo de novos/atualizados."""
     with armazenamento.sessao(_CAMINHO_BANCO) as conn:
         return armazenamento.persistir_lote(conn, lote)
+
+
+def _data_br(iso) -> str:
+    """'2026-11-02T21:34:00+00:00' -> '02/11/2026' (data local); sem dado, '—'."""
+    if not iso:
+        return "—"
+    try:
+        return datetime.fromisoformat(iso).astimezone().strftime("%d/%m/%Y")
+    except ValueError:
+        return "—"
+
+
+def _atos(n: int) -> str:
+    return f"{n} ato localizado" if n == 1 else f"{n} atos localizados"
 
 
 def _titulo_do_registro(tipo: str, registro: dict) -> str:
@@ -265,7 +132,7 @@ def _mostra_detalhe(tipo: str, registro: dict, colunas: list, historico=()):
         valor = registro.get(campo, "")
         if not valor:
             continue
-        st.markdown(f'<div class="icms-campo-detalhe-rotulo">{campo}</div>',
+        st.markdown(f'<div class="icms-campo-detalhe-rotulo">{html.escape(campo)}</div>',
                     unsafe_allow_html=True)
         if tipo == "regime":
             st.markdown(_com_quebras_por_topico(valor))
@@ -332,8 +199,10 @@ def _mostra_analise(analise):
             if linha["Tipo"] == "erro":
                 st.error(f"**{linha['Arquivo']}** não pôde ser lido: {linha['Erro']}")
         c1, c2 = st.columns(2)
-        c1.metric("Consultas", len(lote.consultas))
-        c2.metric("Regimes", len(lote.regimes))
+        with c1, st.container(key="kpi-consultas-analise"):
+            st.metric("Consultas", len(lote.consultas))
+        with c2, st.container(key="kpi-regimes-analise"):
+            st.metric("Regimes", len(lote.regimes))
         for m in diag["mensagens"]:
             if m["codigo"] == "E001":
                 continue  # o erro do arquivo já foi mostrado acima, com o motivo
@@ -343,22 +212,66 @@ def _mostra_analise(analise):
             st.info("Não há nenhum registro para gravar.")
 
 
+def _mostra_resumo(resultado):
+    """Resultado da última gravação: indicadores, avisos por arquivo e planilha."""
+    with st.container(border=True, key="card-resumo"):
+        st.subheader("Resumo do processamento")
+        st.dataframe(resultado["arquivos"], width="stretch", hide_index=True)
+        erros = [a for a in resultado["arquivos"] if a["Tipo"] == "erro"]
+        for e in erros:
+            st.error(f"**{e['Arquivo']}** não pôde ser lido: {e['Erro']}")
+
+        n_descartes = len(resultado["descartes"])
+        c1, c2, c3 = st.columns(3)
+        with c1, st.container(key="kpi-consultas-resumo"):
+            st.metric("Consultas", len(resultado["consultas"]))
+        with c2, st.container(key="kpi-regimes-resumo"):
+            st.metric("Regimes", len(resultado["regimes"]))
+        # o vermelho só aparece quando há descartes: a cor sinaliza pendência
+        with c3, st.container(key=("kpi-descartes-alerta-resumo" if n_descartes
+                                   else "kpi-descartes-resumo")):
+            st.metric("Descartes registrados", n_descartes)
+
+        mapa = resultado["mapeamento"]
+        st.success(
+            f"Gravado: {mapa['consultas']['novos']} consulta(s) nova(s), "
+            f"{mapa['consultas']['atualizados']} atualizada(s); "
+            f"{mapa['regimes']['novos']} regime(s) novo(s), "
+            f"{mapa['regimes']['atualizados']} atualizado(s)."
+        )
+
+        if resultado["descartes"]:
+            with st.expander(f"Ver {n_descartes} descartes"):
+                st.dataframe(resultado["descartes"], width="stretch", hide_index=True)
+
+        st.download_button(
+            "Baixar planilha desta sessão (.xlsx)", resultado["xlsx"],
+            file_name="mapeamento.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            on_click="ignore", icon=":material/download:",
+        )
+
+
 def _tela_inicial():
     """Escolha de perfil. Consulta entra direto; Administrador exige a senha
     de .streamlit/secrets.toml e fica desabilitado se ela não estiver
     configurada (nunca cai em acesso aberto)."""
-    st.markdown("### Como deseja entrar?")
+    design.cabecalho_pagina("Mapeador de Consultas e Regimes Especiais — PR",
+                            "Como deseja entrar?",
+                            "Escolha o perfil para continuar.")
     esperada = acesso.senha_admin(st.secrets)
     col_consulta, col_admin = st.columns(2)
 
     with col_consulta, st.container(border=True, key="perfil-consulta"):
+        design.icone_cartao("search", "primary")
         st.subheader("Consulta")
         st.caption("Pesquisar as consultas e os regimes já mapeados. Sem senha.")
-        if st.button("Entrar para consulta", key="entrar-consulta", type="primary"):
+        if st.button("Entrar para consultar", key="entrar-consulta", type="primary"):
             st.session_state["perfil"] = acesso.PERFIL_CONSULTA
             st.rerun()
 
     with col_admin, st.container(border=True, key="perfil-admin"):
+        design.icone_cartao("lock", "charcoal")
         st.subheader("Administrador")
         st.caption("Importar PDFs e reprocessar o banco. Exige senha.")
         if esperada is None:
@@ -387,114 +300,98 @@ except armazenamento.SchemaMaisNovo as erro:
     st.error(str(erro))
     st.stop()
 
-with st.sidebar:
-    if st.button("Trocar perfil", key="trocar-perfil"):
-        for chave in ("perfil", "resultado", "analise"):
-            st.session_state.pop(chave, None)
-        st.rerun()
-
 if perfil == acesso.PERFIL_ADMIN:
-    aba_processar, aba_consultar = st.tabs(["📥 Processar e mapear", "🔎 Consultar"])
+    aba_processar, aba_consultar = st.tabs(
+        [":material/upload: Processar e mapear", ":material/search: Consultar"])
 else:
     aba_processar = None
-    (aba_consultar,) = st.tabs(["🔎 Consultar"])
+    (aba_consultar,) = st.tabs([":material/search: Consultar"])
 
 if aba_processar is not None:
-  with aba_processar:
-      with st.sidebar:
-          st.header("Como funciona")
-          st.markdown(
-              "1. Envie os PDFs (consultas SEFA e/ou páginas do Diário).\n"
-              "2. A ferramenta detecta o tipo, extrai os campos e mostra uma "
-              "análise para você conferir; só então grava no banco local.\n"
-              "3. Use a aba **Consultar** para buscar o que já foi mapeado, "
-              "ou baixe a planilha desta sessão se quiser.\n\n"
-              "Reprocessar o mesmo PDF atualiza o que já estava mapeado, "
-              "sem duplicar."
-          )
-          st.divider()
-          escolha = st.radio(
-              "Tipo do PDF", list(_FORCAR),
-              help="Use 'forçar' se a detecção automática errar.",
-          )
+    with aba_processar:
+        design.cabecalho_pagina(
+            "Importação", "Processar e mapear",
+            "Envie os PDFs, confira a análise e grave no banco.")
 
-      arquivos = st.file_uploader("Arraste os PDFs aqui", type=["pdf"],
-                                  accept_multiple_files=True)
+        with st.sidebar:
+            design.secao_lateral("Como funciona")
+            st.markdown(
+                "1. Envie os PDFs (consultas SEFA e/ou páginas do Diário).\n"
+                "2. A ferramenta detecta o tipo, extrai os campos e mostra uma "
+                "análise para você conferir; só então grava no banco local.\n"
+                "3. Use a aba **Consultar** para buscar o que já foi mapeado, "
+                "ou baixe a planilha desta sessão se quiser.\n\n"
+                "Reprocessar o mesmo PDF atualiza o que já estava mapeado, "
+                "sem duplicar."
+            )
+            design.secao_lateral("Tipo do PDF")
+            escolha = st.radio(
+                "Tipo do PDF", list(_FORCAR), label_visibility="collapsed",
+                help="Use ‘forçar’ se a detecção automática errar.",
+            )
 
-      criterio = st.selectbox(
-          "Se o mesmo ato aparecer em mais de um arquivo", list(_CRITERIOS),
-          help="Primeira ocorrência: a do primeiro arquivo (ordem alfabética). "
-               "Mais completo: o registro com mais campos preenchidos. "
-               "Mais recente: o de maior data de publicação.",
-      )
+        with st.container(border=True, key="card-envio"):
+            design.titulo_cartao("Arquivos", "PDFs da SEFA-PR e do Diário Oficial")
+            arquivos = st.file_uploader("Arraste os PDFs aqui", type=["pdf"],
+                                        accept_multiple_files=True)
+            criterio = st.selectbox(
+                "Se o mesmo ato aparecer em mais de um arquivo", list(_CRITERIOS),
+                help="Primeira ocorrência: a do primeiro arquivo (ordem alfabética). "
+                     "Mais completo: o registro com mais campos preenchidos. "
+                     "Mais recente: o de maior data de publicação.",
+            )
+            clicou_analisar = st.button("Analisar", type="primary", key="analisar",
+                                        icon=":material/search:",
+                                        disabled=not arquivos)
 
-      if arquivos and st.button("🔍 Analisar", type="primary", key="analisar"):
-          st.session_state.pop("resultado", None)
-          st.session_state["analise"] = _analisar(arquivos, _FORCAR[escolha],
-                                                  _CRITERIOS[criterio])
-          st.session_state["analise"]["nomes"] = tuple(a.name for a in arquivos)
+        if arquivos and clicou_analisar:
+            st.session_state.pop("resultado", None)
+            st.session_state["analise"] = _analisar(arquivos, _FORCAR[escolha],
+                                                    _CRITERIOS[criterio])
+            st.session_state["analise"]["nomes"] = tuple(a.name for a in arquivos)
 
-      # Exibidos a partir da sessão, e não de dentro do `if st.button`: assim a
-      # análise/o resultado continuam na tela depois de qualquer reexecução do
-      # script (por exemplo, o clique em "Baixar").
-      analise = st.session_state.get("analise")
-      if analise and "nomes" in analise and (
-              tuple(a.name for a in arquivos) != analise["nomes"]):
-          st.session_state.pop("analise", None)
-          analise = None
-      resultado = st.session_state.get("resultado")
-      if analise:
-          _mostra_analise(analise)
-          if st.button("💾 Gravar no banco", type="primary", key="gravar",
-                       disabled=not analise["diagnostico"]["pode_continuar"]):
-              st.session_state["resultado"] = _gravar(analise)
-              st.session_state.pop("analise", None)
-              st.rerun()
-      elif resultado:
-          # bloco inteiro num card branco — manual: "blocos de informação em
-          # cards brancos, cantos arredondados, leve elevação"
-          with st.container(border=True, key="card-resumo"):
-              st.subheader("Resumo do processamento")
-              st.dataframe(resultado["arquivos"], width="stretch", hide_index=True)
-              erros = [a for a in resultado["arquivos"] if a["Tipo"] == "erro"]
-              for e in erros:
-                  st.error(f"**{e['Arquivo']}** não pôde ser lido: {e['Erro']}")
-
-              c1, c2, c3 = st.columns(3)
-              c1.metric("Consultas", len(resultado["consultas"]))
-              c2.metric("Regimes", len(resultado["regimes"]))
-              # container próprio só para dar um gancho de CSS à cor de alerta
-              # (ver <style> acima) — o st.metric em si não muda de assinatura
-              with c3, st.container(key="metric-descartes"):
-                  st.metric("Descartes registrados", len(resultado["descartes"]))
-
-              mapa = resultado["mapeamento"]
-              st.caption(
-                  f"Mapeado: {mapa['consultas']['novos']} consulta(s) nova(s), "
-                  f"{mapa['consultas']['atualizados']} atualizada(s); "
-                  f"{mapa['regimes']['novos']} regime(s) novo(s), "
-                  f"{mapa['regimes']['atualizados']} atualizado(s)."
-              )
-
-              if resultado["descartes"]:
-                  with st.expander(f"Ver {len(resultado['descartes'])} descartes"):
-                      st.dataframe(resultado["descartes"], width="stretch", hide_index=True)
-
-              st.download_button(
-                  "⬇️ Baixar planilha desta sessão (.xlsx)", resultado["xlsx"],
-                  file_name="mapeamento.xlsx",
-                  mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                  on_click="ignore",
-              )
-      else:
-          st.info("Envie um ou mais PDFs e clique em **Analisar**.")
+        # Exibidos a partir da sessão, e não de dentro do `if st.button`: assim a
+        # análise/o resultado continuam na tela depois de qualquer reexecução do
+        # script (por exemplo, o clique em "Baixar").
+        analise = st.session_state.get("analise")
+        if analise and "nomes" in analise and (
+                tuple(a.name for a in arquivos) != analise["nomes"]):
+            st.session_state.pop("analise", None)
+            analise = None
+        resultado = st.session_state.get("resultado")
+        if analise:
+            _mostra_analise(analise)
+            if st.button("Gravar no banco", type="primary", key="gravar",
+                         icon=":material/save:",
+                         disabled=not analise["diagnostico"]["pode_continuar"]):
+                st.session_state["resultado"] = _gravar(analise)
+                st.session_state.pop("analise", None)
+                st.rerun()
+        elif resultado:
+            _mostra_resumo(resultado)
+        else:
+            st.info("Envie um ou mais PDFs e clique em **Analisar**.")
 
 
 def _renderiza_consultar(conn):
-    # Painel de busca no estilo da tela de referência (busca de normas):
-    # os mesmos 3 filtros de sempre (tipo/texto/ano), só reorganizados lado
-    # a lado num card com rótulos em destaque — nenhum campo novo, nenhuma
-    # mudança na lógica de core.consulta.buscar().
+    design.cabecalho_pagina(
+        "Base de atos", "Consultar",
+        "Pesquise as consultas e os regimes especiais já mapeados.")
+
+    resumo = consulta.resumo_do_banco(conn)
+    anos = resumo["anos"]
+    faixa_de_anos = (anos[0] if len(anos) == 1 else f"{anos[0]}–{anos[-1]}") if anos else "—"
+    k1, k2, k3, k4 = st.columns(4)
+    with k1, st.container(key="kpi-consultas-base"):
+        st.metric("Consultas mapeadas", resumo["consultas"])
+    with k2, st.container(key="kpi-regimes-base"):
+        st.metric("Regimes mapeados", resumo["regimes"])
+    with k3, st.container(key="kpi-anos-base"):
+        st.metric("Anos cobertos", faixa_de_anos)
+    with k4, st.container(key="kpi-importacao-base"):
+        st.metric("Última importação", _data_br(resumo["ultima_importacao"]))
+
+    # Os 3 filtros de sempre (tipo/texto/ano), lado a lado num cartão.
     with st.container(border=True, key="painel-busca"):
         col_tipo, col_texto, col_ano = st.columns(3)
         with col_tipo:
@@ -502,20 +399,24 @@ def _renderiza_consultar(conn):
         with col_texto:
             texto = st.text_input("Busca textual")
         with col_ano:
-            anos = consulta.anos_disponiveis(conn, tipo)
-            ano = st.selectbox("Ano do ato", ["Todos"] + anos)
+            anos_do_tipo = consulta.anos_disponiveis(conn, tipo)
+            ano = st.selectbox("Ano do ato", ["Todos"] + anos_do_tipo)
 
     ano_filtro = None if ano == "Todos" else ano
     resultados = consulta.buscar_lista(conn, tipo, texto=texto or None, ano=ano_filtro)
 
     with st.container(border=True, key="card-consultar"):
-        st.markdown('<div class="icms-resultado-barra">RESULTADO DA PESQUISA</div>',
-                    unsafe_allow_html=True)
-        st.markdown(
-            f'<div class="icms-total-atos">Total de atos localizados: {len(resultados)}</div>',
-            unsafe_allow_html=True,
-        )
-        st.caption("Selecione uma linha para ver a consulta/regime por inteiro.")
+        design.titulo_cartao("Resultados", _atos(len(resultados)))
+        if not resultados:
+            if texto or ano_filtro:
+                design.estado_vazio("search", "Nenhum ato com esses filtros",
+                                    "Ajuste a busca ou limpe os filtros para ver todos os atos.")
+            else:
+                design.estado_vazio("folder", "Ainda não há atos mapeados",
+                                    "Peça a um administrador para importar os PDFs.")
+            return
+
+        st.caption("Selecione uma linha para abrir o detalhe completo.")
         st.dataframe(resultados, width="stretch", hide_index=True,
                      on_select="rerun", selection_mode="single-row",
                      key="tabela-resultados")
@@ -528,17 +429,25 @@ def _renderiza_consultar(conn):
                 _mostra_detalhe(tipo, completo, cols_do_tipo,
                                 consulta.historico(conn, tipo, completo))
 
-        if resultados:
-            st.download_button(
-                "⬇️ Baixar estes resultados (.xlsx)",
-                lambda: consulta.exportar_busca(tipo, texto or None, ano_filtro,
-                                                _CAMINHO_BANCO),
-                file_name=f"{tipo}s_filtrados.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                on_click="ignore",
-            )
+        st.download_button(
+            "Baixar estes resultados (.xlsx)",
+            lambda: consulta.exportar_busca(tipo, texto or None, ano_filtro,
+                                            _CAMINHO_BANCO),
+            file_name=f"{tipo}s_filtrados.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            on_click="ignore", icon=":material/download:",
+        )
 
 
 with aba_consultar:
     with armazenamento.sessao(_CAMINHO_BANCO) as conn:
         _renderiza_consultar(conn)
+
+# No fim do script, para ficar embaixo do conteúdo da barra lateral.
+with st.sidebar:
+    design.perfil_lateral(_PERFIS[perfil], "Perfil atual")
+    if st.button("Trocar perfil", key="trocar-perfil",
+                 icon=":material/swap_horiz:", width="stretch"):
+        for chave in ("perfil", "resultado", "analise"):
+            st.session_state.pop(chave, None)
+        st.rerun()

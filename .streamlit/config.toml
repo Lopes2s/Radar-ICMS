@@ -1,32 +1,84 @@
-# Tema visual "ICMS Tech" (Martinelli Advogados).
-# Fonte da verdade: manual de marca "ICMS Tech — Conceito 1c" (anexo).
-# Cada valor comentado abaixo com "manual" veio literalmente de lá; os
-# comentados com "extensão" são decisão de implementação (o manual não
-# cobre esse elemento) — ver lista de decisões na entrega.
+# Tema do Design System Martinelli (showcase-design-martinelli.html).
+# Claro e escuro: o Streamlit escolhe pelo sistema ou pelo menu de configurações.
+# Os mesmos valores estão em interface/design.py (TOKENS), que injeta as
+# variáveis de cor usadas no CSS dos componentes — mantenha os dois em sincronia.
+
+[client]
+# esconde Deploy/Rerun/Clear cache (opções de desenvolvedor); mantém o seletor de tema e imprimir
+toolbarMode = "viewer"
 
 [theme]
-base = "light"
-primaryColor = "#1C62CB"            # Azul institucional — manual
-backgroundColor = "#F0F0F0"         # Fundo de página (modo claro) — manual
-secondaryBackgroundColor = "#FFFFFF" # Superfícies/cards (branco) — manual
-textColor = "#262626"               # Grafite — manual
-linkColor = "#1C62CB"               # extensão: reusa o azul institucional
-borderColor = "#E0E0E0"             # extensão: não definido no manual, cinza discreto
-baseRadius = "1rem"                 # cantos arredondados dos cards — manual ("cantos arredondados")
-# Urbanist via Google Fonts — usada no wordmark ("ICMS Tech") e no endosso
-# ("MARTINELLI ADVOGADOS") no manual. Pesos 300/400/600/700 cobrem "ICMS"
-# (700), "Tech" (300) e o endosso (600).
-font = "Urbanist:https://fonts.googleapis.com/css2?family=Urbanist:ital,wght@0,300;0,400;0,600;0,700&display=swap"
-headingFont = "Urbanist:https://fonts.googleapis.com/css2?family=Urbanist:ital,wght@0,300;0,400;0,600;0,700&display=swap"
+# Urbanist: pesos 400-800 do showcase
+font = "Urbanist:https://fonts.googleapis.com/css2?family=Urbanist:wght@400;500;600;700;800&display=swap"
+headingFont = "Urbanist:https://fonts.googleapis.com/css2?family=Urbanist:wght@400;500;600;700;800&display=swap"
+baseFontSize = 15
+headingFontSizes = ["1.75rem", "1.25rem", "1.0625rem", "1rem", "0.9375rem", "0.875rem"]
+headingFontWeights = [800, 800, 700, 700, 600, 600]
+baseRadius = "0.75rem"        # cartões: 12px
+buttonRadius = "0.625rem"     # botões e campos: 10px
+showWidgetBorder = true
+showSidebarBorder = true
+metricValueFontSize = "1.75rem"
+metricValueFontWeight = 800
+linkUnderline = false
 
-[theme.sidebar]
-# Sidebar de navegação com fundo escuro grafite/quase preto — manual
-# (mockup "Uso real"). #1A1A1A é mais escuro que o grafite de texto
-# (#262626) para dar contraste de superfície contra o próprio texto
-# grafite usado no resto do app — extensão (o manual não deu um hex
-# específico para o fundo escuro da sidebar, só "grafite/quase preto").
-backgroundColor = "#1A1A1A"
-secondaryBackgroundColor = "#262626"
-textColor = "#F0F0F0"
-primaryColor = "#1C62CB"             # item ativo em destaque azul — manual
-borderColor = "#3A3A3A"              # extensão
+[theme.light]
+primaryColor = "#1C62CB"
+backgroundColor = "#F1F1F1"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#262626"
+linkColor = "#1C62CB"
+borderColor = "#9CA3AF"
+dataframeBorderColor = "#E8EAED"
+dataframeHeaderBackgroundColor = "#FFFFFF"
+# semânticas: azul informa, verde conclui, âmbar avisa/espera, vermelho erra
+blueColor = "#1C62CB"
+blueBackgroundColor = "#E8EFF9"
+blueTextColor = "#1C62CB"
+greenColor = "#3D7A30"
+greenBackgroundColor = "#EEF5EC"
+greenTextColor = "#3D7A30"
+orangeColor = "#E6960A"
+orangeBackgroundColor = "#FDF5E6"
+orangeTextColor = "#B87408"
+yellowColor = "#E6960A"
+yellowBackgroundColor = "#FDF5E6"
+yellowTextColor = "#B87408"
+redColor = "#C62828"
+redBackgroundColor = "#FCEAEA"
+redTextColor = "#C62828"
+
+[theme.light.sidebar]
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F1F1F1"
+borderColor = "#9CA3AF"
+
+[theme.dark]
+primaryColor = "#1C62CB"
+backgroundColor = "#161617"
+secondaryBackgroundColor = "#232324"
+textColor = "#F1F1F1"
+linkColor = "#7FAAF0"
+borderColor = "#5A5F69"
+dataframeBorderColor = "#34363A"
+dataframeHeaderBackgroundColor = "#232324"
+blueColor = "#1C62CB"
+blueBackgroundColor = "#1F3050"
+blueTextColor = "#7FAAF0"
+greenColor = "#4E9A3F"
+greenBackgroundColor = "#1E2C1C"
+greenTextColor = "#7FC46F"
+orangeColor = "#E6960A"
+orangeBackgroundColor = "#3A2C10"
+orangeTextColor = "#F0AC38"
+yellowColor = "#E6960A"
+yellowBackgroundColor = "#3A2C10"
+yellowTextColor = "#F0AC38"
+redColor = "#D64545"
+redBackgroundColor = "#3C1F1F"
+redTextColor = "#F27C7C"
+
+[theme.dark.sidebar]
+backgroundColor = "#232324"
+secondaryBackgroundColor = "#2C2C2E"
+borderColor = "#5A5F69"

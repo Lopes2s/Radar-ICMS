@@ -57,14 +57,27 @@ pip install -r requirements.txt
 ```
 
 ## 3. Interface
+O visual segue o **Design System Martinelli** (`showcase-design-martinelli.html`):
+logo Martinelli na lateral, fonte Urbanist, cartões, indicadores e abas no
+mesmo padrão dos demais artefatos do escritório.
+
+- **Tema claro e escuro**: o Streamlit escolhe pelo sistema; também dá para
+  trocar em ⋮ → *Settings*. O logo muda sozinho (escuro no tema claro, branco
+  no escuro).
+- **Cores com função**: azul é a ação principal; verde indica conclusão, âmbar
+  indica aviso e vermelho indica erro — nunca só enfeite.
+- Botões e campos mostram anel de foco azul ao navegar pelo teclado.
+- O menu ⋮ mostra só opções de visualização (tema, imprimir); as de
+  desenvolvedor (Deploy, Rerun, Clear cache) ficam ocultas.
+
 Ao abrir, a **tela inicial** pede o perfil. O botão **Trocar perfil**, na barra
 lateral, volta a ela; atualizar a página (F5) também, pois o perfil vive só na
 sessão.
 
 | Perfil | Acesso | Abas |
 |---|---|---|
-| **Consulta** | direto, sem senha | 🔎 Consultar |
-| **Administrador** | exige senha | 📥 Processar e mapear + 🔎 Consultar |
+| **Consulta** | direto, sem senha | Consultar |
+| **Administrador** | exige senha | Processar e mapear + Consultar |
 
 ### Perfis e senha do Administrador
 A senha fica em `.streamlit/secrets.toml`, que não é versionado e precisa ser
@@ -92,10 +105,10 @@ Limites conhecidos:
    *Primeira ocorrência* (padrão; a do primeiro arquivo, em ordem alfabética),
    *Mais completo* (o registro com mais campos preenchidos) ou *Mais recente*
    (a maior data de publicação; empate: o último processado).
-3. **🔍 Analisar** lê os PDFs e mostra o diagnóstico. **Nada é gravado ainda.**
+3. **Analisar** lê os PDFs e mostra o diagnóstico. **Nada é gravado ainda.**
    Cada arquivo com erro aparece com o nome e o motivo, e não impede os demais.
    Se os arquivos enviados mudarem depois da análise, ela é descartada.
-4. **💾 Gravar no banco** (habilitado quando há ao menos um registro) persiste o
+4. **Gravar no banco** (habilitado quando há ao menos um registro) persiste o
    lote e mostra o resumo: quantos atos são novos e quantos foram atualizados.
    Daí é possível baixar a planilha da sessão.
 
@@ -111,13 +124,17 @@ Códigos do diagnóstico:
 | `A401` | aviso | nenhum registro extraído (bloqueia a gravação) |
 
 ### Aba "Consultar"
+- No topo, quatro **indicadores**: consultas mapeadas, regimes mapeados, anos
+  cobertos e data da última importação.
 - Filtros: **tipo de ato**, **busca textual** e **ano**. A busca ignora acentos e
   maiúsculas e trata `%` e `_` como texto comum.
   - Consultas: nº da consulta, súmula, problema, CNAE e resposta.
   - Regimes: nº do regime, empresa, CNPJ, ementa e benefícios/procedimentos.
 - A tabela mostra só colunas curtas. **Selecione uma linha** para abrir o
   detalhe completo (campo a campo) e, se houver, o **histórico de alterações**.
-- **⬇️ Baixar estes resultados (.xlsx)** gera a planilha só quando você clica.
+- Sem resultados, aparece um aviso explicando o motivo (filtros sem retorno ou
+  banco ainda vazio).
+- **Baixar estes resultados (.xlsx)** gera a planilha só quando você clica.
 
 ## 4. Linha de comando
 
@@ -229,7 +246,10 @@ o mesmo caminho — `Execucao` → `pipeline` → `armazenamento`.
 | `processar.py` | linha de comando |
 | `iniciar.py` | abre a interface preparando o ambiente antes |
 | `Mapeador.bat` | atalho de duplo clique para `iniciar.py` |
-| `.streamlit/config.toml`, `assets/` | tema visual "ICMS Tech" |
+| `interface/design.py` | Design System Martinelli: tokens claro/escuro, CSS dos componentes e blocos de HTML (marca, cabeçalho, estado vazio) |
+| `interface/icones.py` | ícones do showcase usados nos indicadores e cartões |
+| `.streamlit/config.toml` | tema nativo do Streamlit (claro e escuro), fonte Urbanist e barra de ferramentas |
+| `assets/` | logos Martinelli (escuro e branco) |
 | `scripts/diag_consultas.py` | diagnóstico manual do parser de consultas |
 
 ## 8. Dependências e bootstrap
@@ -266,7 +286,7 @@ pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-A suíte tem 274 testes e leva cerca de um minuto. Os testes usam uma pasta de
+A suíte tem 297 testes e leva cerca de um minuto. Os testes usam uma pasta de
 dados temporária (`tests/conftest.py`), nunca o banco real do projeto.
 
 ## 10. Distribuição

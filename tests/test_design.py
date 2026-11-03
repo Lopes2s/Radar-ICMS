@@ -1,0 +1,112 @@
+# tests/test_design.py
+import base64
+import os
+import tomllib
+from urllib.parse import unquote
+
+import pytest
+
+from interface import design
+from interface.icones import ICONES
+
+CONFIG = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".streamlit", "config.toml")
+
+
+def test_todo_token_tem_valor_claro_e_escuro():
+    assert all(len(valores) == 2 and all(valores) for valores in design.TOKENS.values())
+
+
+def test_variaveis_css_usam_os_valores_do_tema():
+    claro, escuro = design.variaveis_css("light"), design.variaveis_css("dark")
+    assert "--bg: #F1F1F1;" in claro and "--bg: #161617;" in escuro
+    assert "--primary-ink: #1C62CB;" in claro and "--primary-ink: #7FAAF0;" in escuro
+    assert claro.startswith(":root {") and claro.endswith("}")
+
+
+def test_tema_ativo_cai_em_claro_quando_a_api_falha(monkeypatch):
+    class Quebrado:
+        @property
+        def theme(self):
+            raise RuntimeError("sem contexto")
+
+    monkeypatch.setattr(design.st, "context", Quebrado())
+    assert design.tema_ativo() == "light"
+
+
+@pytest.mark.parametrize("tipo, esperado", [("dark", "dark"), ("light", "light"), (None, "light")])
+def test_tema_ativo_segue_o_tipo_do_streamlit(monkeypatch, tipo, esperado):
+    class Ctx:
+        class theme:  # noqa: N801
+            type = tipo
+
+    monkeypatch.setattr(design.st, "context", Ctx())
+    assert design.tema_ativo() == esperado
+
+
+def test_config_toml_esta_em_sincronia_com_os_tokens():
+    with open(CONFIG, "rb") as fh:
+        tema = tomllib.load(fh)["theme"]
+    pares = {"primaryColor": "primary", "backgroundColor": "bg", "secondaryBackgroundColor": "surface",
+             "textColor": "text", "borderColor": "border", "redColor": "error", "redBackgroundColor": "error-light",
+             "redTextColor": "error-ink", "greenColor": "success", "greenBackgroundColor": "success-light",
+             "greenTextColor": "success-ink", "yellowColor": "warning", "yellowBackgroundColor": "warning-light",
+             "yellowTextColor": "warning-ink", "blueBackgroundColor": "primary-light", "blueTextColor": "primary-ink"}
+    for i, nome_do_tema in enumerate(("light", "dark")):
+        for chave_toml, token in pares.items():
+            assert tema[nome_do_tema][chave_toml].upper() == design.TOKENS[token][i].upper(), \
+                f"{nome_do_tema}.{chave_toml} difere do token {token}"
+
+
+def test_marca_usa_o_logo_certo_para_cada_tema():
+    claro, escuro = design.html_marca("Mapeador", "light"), design.html_marca("Mapeador", "dark")
+    assert "data:image/png;base64," in claro and "data:image/png;base64," in escuro
+    assert claro != escuro  # logo escuro no tema claro, branco no escuro
+    assert "Martinelli Advogados" in claro and "Mapeador" in claro
+
+
+def test_cabecalho_escapa_o_texto_vindo_de_fora():
+    saida = design.html_cabecalho("<b>rótulo</b>", "Título & cia", '"sub"')
+    assert "<b>" not in saida and "&lt;b&gt;" in saida
+    assert "Título &amp; cia" in saida and "&quot;sub&quot;" in saida
+    assert "\n" not in saida  # uma linha só: linha em branco encerra o bloco no Markdown
+
+
+def test_cabecalho_sem_subtitulo_nao_gera_paragrafo():
+    assert "<p>" not in design.html_cabecalho("a", "b")
+
+
+def test_estado_vazio_e_titulo_de_cartao_escapam():
+    assert "&lt;x&gt;" in design.html_vazio("search", "<x>", "texto")
+    assert "&lt;y&gt;" in design.html_titulo_cartao("<y>", "sub")
+
+
+def test_perfil_gera_iniciais():
+    assert "AD</div>" in design.html_perfil("Administrador", "Perfil atual")
+    assert "JS</div>" in design.html_perfil("João Santos", "x")
+
+
+def test_icone_uri_e_um_svg_valido_com_a_cor_pedida():
+    uri = design.icone_uri("search", "#112233")
+    assert uri.startswith("data:image/svg+xml,")
+    svg = unquote(uri.split(",", 1)[1])
+    assert svg.startswith("<svg") and 'stroke="#112233"' in svg and ICONES["search"] in svg
+
+
+def test_css_inclui_variaveis_e_uma_regra_de_icone_por_indicador():
+    css = design.css("dark")
+    assert css.startswith("<style>") and css.endswith("</style>")
+    assert "--surface: #232324;" in css
+    for chave in design.KPIS:
+        assert f'st-key-{chave}"]' in css
+
+
+def test_logos_existem_e_sao_png():
+    for caminho in design._LOGOS.values():
+        with open(caminho, "rb") as fh:
+            assert fh.read(8) == b"\x89PNG\r\n\x1a\n"
+
+
+def test_icones_em_base64_decodificam():
+    # o data URI do logo é base64 válido
+    uri = design._logo_uri("light")
+    assert base64.b64decode(uri.split(",", 1)[1])[:4] == b"\x89PNG"
