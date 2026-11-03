@@ -1,0 +1,100 @@
+# core/edicao.py
+"""Edição manual de consultas e regimes pelo administrador.
+
+Dois momentos:
+- ato já gravado: `editar_registro` (grava na hora, com histórico 'manual');
+- ato ainda na análise: `ajustar_no_lote` (só altera o Lote em memória; o que o
+  administrador ajustou vira `ajustes`/apelidos de chave quando o lote é gravado).
+
+Tudo que o administrador ajusta à mão fica marcado em `ajustes`: a reimportação
+do PDF não sobrescreve esses campos, a menos que o administrador confirme
+(ver `ajustes_em_conflito` e o parâmetro `sobrescrever` de persistir_lote).
+Corrigir a CHAVE de um ato também é permitido; a chave antiga vira apelido
+(`chaves_substituidas`) para o PDF original continuar caindo no mesmo ato.
+
+Sem Streamlit: quem chama (app.py) cuida do perfil (`acesso.exige_admin`).
+"""
+from core import armazenamento, pipeline
+
+TIPOS = {
+    'consulta': ('consultas', armazenamento.COLUNAS_CONSULTAS, pipeline.CHAVE_CONSULTAS),
+    'regime': ('regimes', armazenamento.COLUNAS_REGIMES, pipeline.CHAVE_REGIMES),
+}
+
+
+class RegistroInexistente(LookupError):
+    """Não há ato com a chave informada."""
+
+
+class ChaveEmConflito(ValueError):
+    """A chave nova já pertence a outro ato."""
+
+
+class ChaveVazia(ValueError):
+    """Nenhum campo da chave pode ficar em branco."""
+
+
+def _tipo(tipo: str):
+    if tipo not in TIPOS:
+        raise ValueError(f"tipo deve ser um de {tuple(TIPOS)}: {tipo!r}")
+    return TIPOS[tipo]
+
+
+def _limpo(valor) -> str:
+    return '' if valor is None else str(valor).strip()
+
+
+def _texto(valor) -> str:
+    return '' if valor is None else str(valor)
+
+
+def _validar(colunas, novos):
+    desconhecidos = sorted(set(novos) - set(colunas))
+    if desconhecidos:
+        raise ValueError(f"campo(s) inexistente(s): {desconhecidos}")
+
+
+def editar_registro(conn, tipo: str, chave_atual: dict, novos: dict) -> dict:
+    """Edita um ato JÁ GRAVADO. `novos` traz só os campos (ou todos) a alterar,
+    inclusive a chave. Devolve {'alterados': [campos], 'chave_trocada': bool}.
+
+    Tudo ou nada: se algo falhar no meio, nada é gravado. Cada edição guarda a
+    versão anterior em `historico` (origem 'manual') e marca os campos editados em
+    `ajustes`. Levanta RegistroInexistente, ChaveVazia ou ChaveEmConflito."""
+    tabela, colunas, chave = _tipo(tipo)
+    _validar(colunas, novos)
+    atual = armazenamento.buscar_detalhe(conn, tabela, chave, chave_atual)
+    if atual is None:
+        raise RegistroInexistente(f"Não há ato com a chave {chave_atual!r}.")
+    final = {c: (_limpo(novos[c]) if c in novos else _texto(atual.get(c))) for c in colunas}
+    alterados = [c for c in colunas if _texto(atual.get(c)) != final[c]]
+    if not alterados:
+        return {'alterados': [], 'chave_trocada': False}
+
+    antiga = tuple(_texto(atual[c]) for c in chave)
+    nova = tuple(final[c] for c in chave)
+    if not all(nova):
+        raise ChaveVazia("O número e os demais campos da chave não podem ficar em branco.")
+    trocada = nova != antiga
+    if trocada and armazenamento.buscar_detalhe(
+            conn, tabela, chave, dict(zip(chave, nova))) is not None:
+        raise ChaveEmConflito(
+            "Já existe outro ato com essa chave. Corrija a chave para um valor livre "
+            "ou edite o ato existente.")
+    try:
+        armazenamento.registrar_alteracao(conn, tabela, chave, antiga, atual, alterados,
+                                          origem='manual')
+        sets = ', '.join(f'"{c}" = ?' for c in alterados)
+        onde = ' AND '.join(f'"{c}" = ?' for c in chave)
+        conn.execute(f'UPDATE {tabela} SET {sets} WHERE {onde}',
+                     [final[c] for c in alterados] + list(antiga))
+        armazenamento.juntar_ajustes(conn, tabela, chave, antiga,
+                                     [c for c in alterados if c not in chave])
+        if trocada:
+            armazenamento.mover_chave_auxiliares(conn, tabela, chave, antiga, nova)
+            armazenamento.registrar_substituicao(conn, tabela, chave, antiga, nova)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return {'alterados': alterados, 'chave_trocada': trocada}
