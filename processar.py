@@ -126,12 +126,12 @@ def _imprime_conflitos(conflitos: list, sobrescrevendo: bool) -> None:
 
 
 def _conflitos_na_simulacao(armazenamento, edicao, banco, lote) -> None:
-    """Na simulação só LÊ: se o banco já existe e está no schema atual, mostra os
+    """Na simulação só LÊ: se o banco já existe e tem as tabelas de ajustes (schema 3+), mostra os
     ajustes que seriam mantidos; nunca cria nem migra o banco."""
     if not os.path.exists(armazenamento.caminho_do_banco(banco)):
         return
     with armazenamento.aberta(banco) as conn:
-        if armazenamento.versao_do_schema(conn) < armazenamento.SCHEMA_VERSAO:
+        if armazenamento.versao_do_schema(conn) < 3:   # `ajustes` surgiu no schema 3
             return
         _imprime_conflitos(edicao.ajustes_em_conflito(conn, lote), False)
 

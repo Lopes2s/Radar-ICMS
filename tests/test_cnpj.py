@@ -189,6 +189,37 @@ def test_atualizar_do_lote_usa_so_os_cnpjs_dos_regimes(tmp_path):
     assert r['consultados'] == 1 and r['ignorados'] == 1
 
 
+def test_erro_inesperado_na_consulta_nao_escapa_de_atualizar(tmp_path):
+    conn = _conn(tmp_path)
+    rede = Rede(erro=ValueError('boom'))
+    r = cnpj.atualizar(conn, [ALFA], abrir=rede, agora=AGORA, dormir=lambda s: None)
+    assert r['consultados'] == 0 and len(r['falhas']) == 1
+    assert r['falhas'][0][1].startswith('erro inesperado')
+
+
+def test_erros_inesperados_seguidos_interrompem_o_lote(tmp_path):
+    conn = _conn(tmp_path)
+    rede = Rede(erro=ValueError('boom'))
+    r = cnpj.atualizar(conn, ['00000000000191', '11222333000181', '33000167000101'],
+                       abrir=rede, agora=AGORA, dormir=lambda s: None)
+    assert r['interrompido'] and r['pendentes'] == 1 and len(rede.urls) == 2
+
+
+def test_atualizar_do_lote_consulta_o_cnpj_corrigido_do_ato(tmp_path):
+    from core import edicao
+    conn = _conn(tmp_path)
+    regime = {'ANO': '2026', 'DATA': '2026-03-01', 'Nº DO REGIME ESPECIAL': '9.053/2026',
+              'EMPRESA': 'Alfa', 'CNPJ REQUERENTE': ALFA, 'VIGÊNCIA DO RE': '', 'EMENTA': 'e'}
+    armazenamento.salvar_regimes(conn, [regime])
+    edicao.editar_registro(conn, 'regime',
+                           {'Nº DO REGIME ESPECIAL': '9.053/2026', 'CNPJ REQUERENTE': ALFA},
+                           {'CNPJ REQUERENTE': BB})
+    rede = Rede()
+    lote = Lote(regimes=[dict(regime)])
+    cnpj.atualizar_do_lote(conn, lote, abrir=rede, agora=AGORA, dormir=lambda s: None)
+    assert rede.urls == ['https://brasilapi.com.br/api/cnpj/v1/00000000000191']
+
+
 # --- mensagem e divergência --------------------------------------------------
 def test_mensagem_do_resumo():
     base = {'consultados': 0, 'do_cache': 0, 'ignorados': 0, 'falhas': [],

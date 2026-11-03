@@ -158,8 +158,9 @@ Ao **gravar**, o CNPJ de cada regime é consultado na [BrasilAPI](https://brasil
 
 - O CNAE da Receita é o **atual** da empresa e pode diferir do vigente na data do regime; por isso ele não sobrescreve nada sozinho. Se o regime já tiver um CNAE diferente, o detalhe mostra um aviso de divergência.
 - O administrador pode **Consultar CNPJ / Atualizar consulta** pelo detalhe e **Aplicar CNAE da Receita ao regime** (preenche *CNAE REQUERENTE* e *DESCRIÇÃO CNAE*; fica no histórico como ajuste manual e a reimportação não o desfaz). Após a consulta o detalhe fecha e o resultado aparece ao reabrir o ato.
-- Consultas com menos de 30 dias são reaproveitadas. Sem internet, a gravação segue normalmente e a tela (ou a CLI) avisa que a consulta falhou; duas falhas de conexão seguidas interrompem o resto do lote.
-- Só o CNPJ (dado público) sai da máquina. Para desligar: `--sem-consulta-cnpj` na CLI ou a variável de ambiente `MAPEADOR_CONSULTA_CNPJ=0`.
+- Na consulta **automática ao gravar**, consultas com menos de 30 dias são reaproveitadas; o botão do detalhe sempre refaz a consulta. Sem internet, a gravação segue normalmente e a tela (ou a CLI) avisa que a consulta falhou; duas falhas de conexão seguidas interrompem o resto do lote.
+- Só o CNPJ (dado público) sai da máquina. Para desligar a consulta **automática**: `--sem-consulta-cnpj` na CLI ou a variável de ambiente `MAPEADOR_CONSULTA_CNPJ=0` (o botão do administrador no detalhe continua funcionando).
+- Como o leitor de PDF sempre deixa o CNAE em branco, um CNAE aplicado com *Aplicar CNAE da Receita ao regime* aparece como ajuste em conflito a cada reimportação desse PDF. Para mantê-lo, deixe-o desmarcado na análise (e não use `--sobrescrever-ajustes` na CLI): sobrescrever com o PDF apaga o CNAE.
 
 ## 4. Linha de comando
 
@@ -316,7 +317,7 @@ pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-A suíte tem 416 testes e leva cerca de um minuto. Os testes usam uma pasta de
+A suíte tem 421 testes e leva cerca de um minuto. Os testes usam uma pasta de
 dados temporária (`tests/conftest.py`), nunca o banco real do projeto.
 
 ## 10. Distribuição

@@ -323,6 +323,23 @@ def test_simular_em_banco_do_schema_antigo_nao_o_migra(tmp_path):
     assert armazenamento.versao_do_schema(conn) == 2      # continua como estava
     conn.close()
 
+def test_simular_em_banco_do_schema_3_ainda_mostra_os_ajustes(tmp_path, capsys):
+    pasta, banco = _importa_e_ajusta_o_protocolo(tmp_path)
+    conn = armazenamento.conectar(str(banco))
+    conn.execute("DROP TABLE cnpj_receita")
+    conn.execute("PRAGMA user_version = 3")
+    conn.commit()
+    conn.close()
+    capsys.readouterr()
+
+    assert processar.main([str(pasta), "--banco", str(banco), "--simular"]) == 0
+
+    assert "Ajustes manuais encontrados" in capsys.readouterr().out
+    conn = armazenamento.conectar(str(banco))
+    assert armazenamento.versao_do_schema(conn) == 3      # não migrou
+    conn.close()
+
+
 # --- consulta do CNPJ ao gravar (BrasilAPI) ----------------------------------
 def _pasta_com_regime(tmp_path):
     pasta = tmp_path / "pdfs"
