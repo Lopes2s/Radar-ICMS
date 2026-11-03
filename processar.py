@@ -1,12 +1,15 @@
 # processar.py
 """CLI: python processar.py <pasta_com_pdfs> [--banco arquivo.db] [--xlsx saida.xlsx]
                             [--dedup primeira|completo|recente] [--simular]
-                            [--sobrescrever-ajustes]
+                            [--sobrescrever-ajustes] [--sem-consulta-cnpj]
 
 Persiste no banco por padrão. A planilha é uma exportação opcional (--xlsx).
 --simular lê e diagnostica os PDFs sem gravar nada.
 Atos que o administrador ajustou à mão na interface MANTÊM o valor ajustado ao
 reimportar; --sobrescrever-ajustes faz o valor do PDF vencer em todos eles.
+Ao gravar, consulta o CNPJ dos regimes na BrasilAPI (CNAE e situação cadastral);
+--sem-consulta-cnpj ou MAPEADOR_CONSULTA_CNPJ=0 desligam a consulta. Sem internet
+a gravação segue normalmente e a CLI avisa que a consulta falhou.
 
 Códigos de saída: 0 = tudo certo; 1 = uso incorreto, nenhum PDF, planilha
 aberta no Excel ou banco de versão mais nova; 2 = algum PDF não pôde ser lido
@@ -20,7 +23,7 @@ from core.bootstrap import DEPS_CLI, garantir_dependencias, tolera_encoding_do_c
 
 _USO = ("Uso: python processar.py <pasta_com_pdfs> [--banco arquivo.db] "
         "[--xlsx saida.xlsx] [--dedup primeira|completo|recente] [--simular] "
-        "[--sobrescrever-ajustes]")
+        "[--sobrescrever-ajustes] [--sem-consulta-cnpj]")
 
 
 def main(argv=None) -> int:
@@ -44,6 +47,7 @@ def main(argv=None) -> int:
         return 1
     simular = "--simular" in argv
     sobrescrever_ajustes = "--sobrescrever-ajustes" in argv
+    sem_consulta_cnpj = "--sem-consulta-cnpj" in argv
 
     pdfs = sorted(glob.glob(os.path.join(pasta, "*.pdf")))
     if not pdfs:
@@ -53,7 +57,7 @@ def main(argv=None) -> int:
     # dentro do main (e não no import) para que importar este módulo — nos
     # testes, por exemplo — nunca dispare um pip install.
     garantir_dependencias(DEPS_CLI)
-    from core import armazenamento, edicao, log, pipeline, planilha  # noqa: E402
+    from core import armazenamento, cnpj, edicao, log, pipeline, planilha  # noqa: E402
     from core.execucao import Execucao  # noqa: E402
 
     dedup = dedup or pipeline.CRITERIO_PADRAO
@@ -63,7 +67,8 @@ def main(argv=None) -> int:
 
     log.configurar_log(armazenamento.pasta_dados())
 
-    execucao = Execucao(ao_arquivo=_imprime_linha, dedup=dedup)
+    execucao = Execucao(ao_arquivo=_imprime_linha, dedup=dedup,
+                        consultar_cnpj=not sem_consulta_cnpj)
     lote = execucao.carregar([(c, os.path.basename(c)) for c in pdfs])
     _imprime_diagnostico(execucao.diagnostico)
     erros = execucao.arquivos_com_erro()
@@ -100,6 +105,9 @@ def main(argv=None) -> int:
           f"{resultado['consultas']['atualizados']} atualizadas")
     print(f"  Regimes:   {resultado['regimes']['novos']} novos, "
           f"{resultado['regimes']['atualizados']} atualizados")
+    mensagem = cnpj.mensagem_do_resumo(execucao.resumo_cnpj)
+    if mensagem:
+        print(f"  Receita:   {mensagem}")
     if xlsx:
         print(f"  Planilha:  {xlsx}")
     return _finaliza(erros)

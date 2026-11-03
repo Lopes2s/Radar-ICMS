@@ -322,3 +322,63 @@ def test_simular_em_banco_do_schema_antigo_nao_o_migra(tmp_path):
     conn = armazenamento.conectar(str(banco))
     assert armazenamento.versao_do_schema(conn) == 2      # continua como estava
     conn.close()
+
+# --- consulta do CNPJ ao gravar (BrasilAPI) ----------------------------------
+def _pasta_com_regime(tmp_path):
+    pasta = tmp_path / "pdfs"
+    pasta.mkdir()
+    shutil.copy(os.path.join(FIX, "Regime_Agroantunes.pdf"), pasta / "r.pdf")
+    return pasta
+
+
+def _com_rede(monkeypatch):
+    from tests.test_cnpj import Rede
+    rede = Rede()
+    monkeypatch.setenv("MAPEADOR_CONSULTA_CNPJ", "1")
+    monkeypatch.setattr("core.cnpj._abrir", rede)
+    return rede
+
+
+def test_cli_consulta_o_cnpj_do_regime_ao_gravar(tmp_path, monkeypatch, capsys):
+    rede = _com_rede(monkeypatch)
+    banco = tmp_path / "b.db"
+    codigo = processar.main([str(_pasta_com_regime(tmp_path)), "--banco", str(banco)])
+    saida = capsys.readouterr().out
+    assert codigo == 0
+    assert len(rede.urls) == 1
+    assert "Receita:   1 CNPJ(s) consultado(s)" in saida
+    conn = armazenamento.conectar(str(banco))
+    assert conn.execute("SELECT COUNT(*) FROM cnpj_receita").fetchone()[0] == 1
+    conn.close()
+
+
+def test_cli_sem_consulta_cnpj_nao_chama_a_rede(tmp_path, monkeypatch, capsys):
+    rede = _com_rede(monkeypatch)
+    codigo = processar.main([str(_pasta_com_regime(tmp_path)), "--banco", str(tmp_path / "b.db"),
+                             "--sem-consulta-cnpj"])
+    assert codigo == 0 and rede.urls == []
+    assert "Receita:" not in capsys.readouterr().out
+
+
+def test_cli_simular_nao_consulta_o_cnpj(tmp_path, monkeypatch, capsys):
+    rede = _com_rede(monkeypatch)
+    codigo = processar.main([str(_pasta_com_regime(tmp_path)), "--banco", str(tmp_path / "b.db"),
+                             "--simular"])
+    assert codigo == 0 and rede.urls == []
+    assert not os.path.exists(tmp_path / "b.db")
+
+
+def test_cli_sem_internet_grava_e_avisa(tmp_path, monkeypatch, capsys):
+    import urllib.error
+    from tests.test_cnpj import Rede
+    monkeypatch.setenv("MAPEADOR_CONSULTA_CNPJ", "1")
+    monkeypatch.setattr("core.cnpj._abrir", Rede(erro=urllib.error.URLError("sem rede")))
+    banco = tmp_path / "b.db"
+    codigo = processar.main([str(_pasta_com_regime(tmp_path)), "--banco", str(banco)])
+    saida = capsys.readouterr().out
+    assert codigo == 0
+    assert "Regimes:   1 novos" in saida
+    assert "Receita:   1 sem resposta" in saida
+    conn = armazenamento.conectar(str(banco))
+    assert len(armazenamento.buscar_regimes(conn)) == 1
+    conn.close()
