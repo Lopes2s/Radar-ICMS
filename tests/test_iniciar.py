@@ -76,3 +76,72 @@ def test_endereco_com_acento_nao_quebra_em_console_ascii(monkeypatch):
     assert codigo == 0
     saida = buf.getvalue().decode('ascii')
     assert "Endere" in saida  # o 'ç' virou '?', mas não travou
+
+
+import json
+import os
+
+
+def test_segundo_clique_reabre_o_servidor_em_execucao(monkeypatch):
+    abertos, chamadas = [], []
+    monkeypatch.setattr(iniciar, '_porta_em_execucao', lambda: 8503)
+    monkeypatch.setattr(iniciar.webbrowser, 'open', lambda url: abertos.append(url))
+    monkeypatch.setattr(iniciar.subprocess, 'call', lambda *a, **k: chamadas.append(a) or 0)
+
+    assert iniciar.main() == 0
+    assert abertos == ["http://localhost:8503"]
+    assert chamadas == []          # não subiu um segundo servidor
+
+
+def test_porta_em_execucao_exige_marcador_e_servidor_saudavel(monkeypatch):
+    assert iniciar._porta_em_execucao() is None          # sem marcador
+    iniciar._registrar_servidor(8502)
+    monkeypatch.setattr(iniciar, '_saudavel', lambda porta: False)
+    assert iniciar._porta_em_execucao() is None          # marcador velho (servidor caiu)
+    monkeypatch.setattr(iniciar, '_saudavel', lambda porta: porta == 8502)
+    assert iniciar._porta_em_execucao() == 8502
+    iniciar._esquecer_servidor()
+    assert iniciar._porta_em_execucao() is None
+
+
+def test_marcador_existe_durante_o_servidor_e_some_depois(monkeypatch):
+    visto = {}
+
+    def servidor_falso(*a, **k):
+        with open(iniciar._arquivo_servidor(), encoding='utf-8') as f:
+            visto['porta'] = json.load(f)['porta']
+        return 0
+
+    monkeypatch.setattr(iniciar, '_abrir_quando_subir', lambda *a, **k: None)
+    monkeypatch.setattr(iniciar.subprocess, 'call', servidor_falso)
+    assert iniciar.main() == 0
+    assert isinstance(visto['porta'], int)
+    assert not os.path.exists(iniciar._arquivo_servidor())
+
+
+def test_sem_console_a_saida_do_servidor_vai_para_arquivo(monkeypatch):
+    monkeypatch.setattr(sys, 'stdout', None)
+    monkeypatch.setattr(sys, 'stderr', None)
+    destino = iniciar._destino_da_saida()
+    assert destino['stdin'] == iniciar.subprocess.DEVNULL
+    assert destino['stderr'] == iniciar.subprocess.STDOUT
+    assert destino['stdout'].name.endswith(os.path.join('logs', 'servidor.log'))
+    destino['stdout'].close()
+
+
+def test_com_console_nao_redireciona_nada():
+    assert iniciar._destino_da_saida() == {}
+
+
+def test_erro_de_inicializacao_sem_console_vira_caixa_de_mensagem(monkeypatch):
+    caixas = []
+    monkeypatch.setattr(sys, 'stderr', None)
+    monkeypatch.setattr(sys, 'platform', 'win32')
+    monkeypatch.setattr(iniciar, '_caixa_de_mensagem', lambda t: caixas.append(t))
+    iniciar._avisar_erro("falta o streamlit")
+    assert caixas == ["falta o streamlit"]
+
+
+def test_erro_de_inicializacao_com_console_vai_para_stderr(capsys):
+    iniciar._avisar_erro("falta o streamlit")
+    assert "falta o streamlit" in capsys.readouterr().err
