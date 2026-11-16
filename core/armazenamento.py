@@ -100,6 +100,19 @@ class SchemaMaisNovo(RuntimeError):
     """O banco foi criado por uma versão mais nova da ferramenta."""
 
 
+class BancoIndisponivel(RuntimeError):
+    """O banco não existe ou está num schema mais antigo do que esta versão lê.
+
+    Quem só consulta não cria nem migra o banco: o Administrador precisa abrir a
+    ferramenta antes (ver `sessao_leitura`)."""
+
+
+def _msg_schema_mais_novo(atual: int) -> str:
+    return (f"Este banco foi criado por uma versão mais nova da ferramenta "
+            f"(schema {atual}; esta versão conhece até {SCHEMA_VERSAO}). "
+            f"Atualize a ferramenta antes de abrir este banco.")
+
+
 def versao_do_schema(conn: sqlite3.Connection) -> int:
     return conn.execute('PRAGMA user_version').fetchone()[0]
 
@@ -118,18 +131,29 @@ def caminho_do_banco(caminho_bd: str | None = None) -> str:
             or os.path.join(pasta_dados(), 'mapeamento.db'))
 
 
-def conectar(caminho_bd: str | None = None) -> sqlite3.Connection:
-    """Abre (ou cria) o banco (ver `caminho_do_banco` para a escolha do arquivo)."""
-    conn = sqlite3.connect(caminho_do_banco(caminho_bd))
+# Em pasta de rede o bloqueio demora mais que os 5 s padrão do sqlite3.
+_ESPERA_BLOQUEIO_S = 30
+
+
+def conectar(caminho_bd: str | None = None,
+             somente_leitura: bool = False) -> sqlite3.Connection:
+    """Abre (ou cria) o banco (ver `caminho_do_banco` para a escolha do arquivo).
+
+    `somente_leitura` usa PRAGMA query_only em vez de abrir o arquivo com
+    `mode=ro`, porque a URI de leitura não funciona bem com caminhos de rede
+    (`\\\\servidor\\pasta`)."""
+    conn = sqlite3.connect(caminho_do_banco(caminho_bd), timeout=_ESPERA_BLOQUEIO_S)
     conn.row_factory = sqlite3.Row
     conn.create_function('norm', 1, normalizar, deterministic=True)
+    if somente_leitura:
+        conn.execute('PRAGMA query_only = ON')
     return conn
 
 
 @contextmanager
-def aberta(caminho_bd: str | None = None):
+def aberta(caminho_bd: str | None = None, somente_leitura: bool = False):
     """Conexão que é FECHADA ao sair do bloco, com ou sem erro."""
-    conn = conectar(caminho_bd)
+    conn = conectar(caminho_bd, somente_leitura)
     try:
         yield conn
     finally:
@@ -141,6 +165,30 @@ def sessao(caminho_bd: str | None = None):
     """Como `aberta`, com o esquema já criado/atualizado (idempotente)."""
     with aberta(caminho_bd) as conn:
         criar_esquema(conn)
+        yield conn
+
+
+@contextmanager
+def sessao_leitura(caminho_bd: str | None = None):
+    """Conexão SOMENTE LEITURA para o perfil Consulta.
+
+    Não cria o arquivo (o sqlite3 criaria um banco vazio no caminho) e não migra
+    o esquema: se o banco não existe ou é de um schema mais antigo, quem tem
+    permissão de gravar (o Administrador) precisa abrir a ferramenta primeiro."""
+    caminho = caminho_do_banco(caminho_bd)
+    if not os.path.exists(caminho):
+        raise BancoIndisponivel(
+            "O banco de dados ainda não existe nesta pasta. Peça ao Administrador "
+            "para abrir a ferramenta e importar os PDFs, e confira se a pasta de "
+            "rede está acessível.")
+    with aberta(caminho_bd, somente_leitura=True) as conn:
+        atual = versao_do_schema(conn)
+        if atual > SCHEMA_VERSAO:
+            raise SchemaMaisNovo(_msg_schema_mais_novo(atual))
+        if atual < SCHEMA_VERSAO:
+            raise BancoIndisponivel(
+                "O banco está numa versão antiga. O Administrador precisa abrir a "
+                "ferramenta uma vez para atualizá-lo; depois é só recarregar.")
         yield conn
 
 
@@ -334,10 +382,7 @@ def criar_esquema(conn: sqlite3.Connection) -> None:
     """
     atual = versao_do_schema(conn)
     if atual > SCHEMA_VERSAO:
-        raise SchemaMaisNovo(
-            f"Este banco foi criado por uma versão mais nova da ferramenta "
-            f"(schema {atual}; esta versão conhece até {SCHEMA_VERSAO}). "
-            f"Atualize a ferramenta antes de abrir este banco.")
+        raise SchemaMaisNovo(_msg_schema_mais_novo(atual))
     _criar_tabela(conn, 'consultas', COLUNAS_CONSULTAS, CHAVE_CONSULTAS)
     _criar_tabela(conn, 'regimes', COLUNAS_REGIMES, CHAVE_REGIMES)
     conn.execute(_DDL_HISTORICO)

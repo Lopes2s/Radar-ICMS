@@ -68,7 +68,7 @@ def exportar_busca(tipo: str, texto=None, ano=None, caminho_bd=None) -> bytes:
     O `st.download_button` executa esta função numa thread à parte, quando o
     usuário clica; uma conexão SQLite aberta em outra thread não pode ser
     usada ali."""
-    with armazenamento.aberta(caminho_bd) as conn:
+    with armazenamento.aberta(caminho_bd, somente_leitura=True) as conn:
         return exportar_xlsx(tipo, buscar(conn, tipo, texto, ano))
 
 
