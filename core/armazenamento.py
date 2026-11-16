@@ -32,7 +32,8 @@ COLUNAS_REGIMES = [
 COLUNAS_LISTA_CONSULTAS = ['Ano', 'Nº da Consulta', 'Data da Publicação',
                            'Súmula', 'CNAE Detectado']
 COLUNAS_LISTA_REGIMES = ['ANO', 'DATA', 'Nº DO REGIME ESPECIAL', 'EMPRESA',
-                         'CNPJ REQUERENTE', 'VIGÊNCIA DO RE', 'EMENTA']
+                         'CNPJ REQUERENTE', 'CNAE REQUERENTE', 'VIGÊNCIA DO RE',
+                         'EMENTA']
 
 
 def _select(colunas) -> str:

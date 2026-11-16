@@ -436,3 +436,8 @@ def test_schema_sobe_para_a_versao_atual_e_banco_v1_e_migrado(tmp_path):
     assert armazenamento.versao_do_schema(conn) == armazenamento.SCHEMA_VERSAO
     conn.execute("SELECT COUNT(*) FROM historico")
     conn.execute("SELECT COUNT(*) FROM importacoes")
+
+
+def test_lista_de_regimes_mostra_o_cnae_logo_apos_o_cnpj():
+    lista = armazenamento.COLUNAS_LISTA_REGIMES
+    assert lista.index('CNAE REQUERENTE') == lista.index('CNPJ REQUERENTE') + 1
