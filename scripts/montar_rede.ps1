@@ -33,6 +33,8 @@ function Test-EmUso($arquivo) {
         $f = [IO.File]::Open($arquivo, 'Open', 'ReadWrite', 'None')
         $f.Close()
         return $false
+    } catch [UnauthorizedAccessException] {
+        throw "Sem permissao de escrita em $arquivo."
     } catch [IO.IOException] {
         return $true
     }
@@ -51,7 +53,9 @@ if (git -C $raizRepo status --porcelain) {
     Write-Warning "Ha alteracoes nao commitadas: so o que esta em HEAD vai para a rede."
 }
 $zipCodigo = Join-Path $tmp "codigo.zip"
+Remove-Item $zipCodigo -Force -ErrorAction SilentlyContinue   # nunca reaproveitar zip antigo
 git -C $raizRepo archive --format=zip -o $zipCodigo HEAD
+if ($LASTEXITCODE -ne 0) { throw "Falha no passo 1: git archive nao gerou o codigo." }
 Expand-Archive $zipCodigo -DestinationPath $app -Force
 
 # 2. Python portatil (embeddable), so na primeira vez.
@@ -68,14 +72,17 @@ if (-not (Test-Path (Join-Path $py "python.exe"))) {
     $getPip = Join-Path $tmp "get-pip.py"
     Invoke-WebRequest "https://bootstrap.pypa.io/get-pip.py" -OutFile $getPip
     & (Join-Path $py "python.exe") $getPip --no-warn-script-location
+    if ($LASTEXITCODE -ne 0) { throw "Falha no passo 2: instalacao do pip (get-pip.py)." }
 }
 
 # 3. Dependencias, sempre pelo requirements.txt (fonte unica das versoes).
 & (Join-Path $py "python.exe") -m pip install -r (Join-Path $app "requirements.txt") --no-warn-script-location
+if ($LASTEXITCODE -ne 0) { throw "Falha no passo 3: pip install -r requirements.txt." }
 
 # 4. Atalho na raiz da pasta de rede.
 Copy-Item (Join-Path $raizRepo "scripts\Mapeador.vbs") (Join-Path $Destino "Mapeador.vbs") -Force
 
 # 5. Teste de fumaca: as bibliotecas importam no Python portatil.
 & (Join-Path $py "python.exe") -c "import streamlit, pdfplumber, openpyxl; print('Python portatil OK')"
+if ($LASTEXITCODE -ne 0) { throw "Falha no passo 5: teste de fumaca do Python portatil." }
 Write-Host "Pronto: $Destino. Peca aos usuarios para criarem um atalho para Mapeador.vbs na area de trabalho."

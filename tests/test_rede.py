@@ -39,3 +39,12 @@ def test_script_de_montagem_recusa_atualizar_com_a_ferramenta_em_uso():
         texto = arquivo.read()
     assert "Test-EmUso" in texto
     assert "$Forcar" in texto
+
+
+def test_script_de_montagem_aborta_em_falha_de_comando_nativo():
+    caminho = os.path.join(RAIZ, "scripts", "montar_rede.ps1")
+    with open(caminho, encoding="utf-8") as arquivo:
+        texto = arquivo.read()
+    assert texto.count("$LASTEXITCODE") >= 4
+    assert "UnauthorizedAccessException" in texto
+    assert texto.index("Remove-Item") < texto.index("archive")

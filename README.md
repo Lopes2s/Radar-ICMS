@@ -323,7 +323,7 @@ pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-A suíte tem 421 testes e leva cerca de um minuto. Os testes usam uma pasta de
+A suíte tem 492 testes e leva cerca de um minuto. Os testes usam uma pasta de
 dados temporária (`tests/conftest.py`), nunca o banco real do projeto.
 
 ## 10. Distribuição
@@ -374,13 +374,16 @@ Na máquina de destino, `Mapeador.bat` cria o `.venv` na primeira execução (pr
 de internet nessa vez). O `.streamlit/secrets.toml` e o `mapeamento.db` precisam
 ser criados/copiados à parte (não são versionados).
 
+Observação: guardar o `secrets.toml` dentro do projeto vale só para esta instalação de uma máquina, não para a pasta de rede.
+
 ## 11. Limitações conhecidas
 - Os padrões de vigência dos regimes cobrem os casos vistos; podem existir
   outros no histórico do Diário Oficial.
 - Layouts de PDF muito diferentes dos fixtures podem exigir ajuste dos limiares
   de `_marca_paragrafos_da_pagina` (`core/pdf_text.py`); se a detecção falhar, a
   Resposta cai no texto achatado de sempre.
-- O banco é local (SQLite, um usuário por vez); a senha do Administrador é texto
+- O banco fica numa pasta de rede (SQLite sobre SMB), com um gravador por vez: isso só é
+  seguro por causa da trava de importação; gravações simultâneas não são suportadas. A senha do Administrador é texto
   puro no disco (ver [Perfis e senha](#perfis-e-senha-do-administrador)).
 - A consulta de CNPJ depende de internet e de um serviço público de terceiros
   (BrasilAPI), sem garantia de disponibilidade; sem ela, o CNAE da Receita fica
