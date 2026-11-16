@@ -72,11 +72,43 @@ def _registrar_servidor(porta: int) -> None:
         json.dump({'porta': porta}, arquivo)
 
 
-def _esquecer_servidor() -> None:
+def _esquecer_servidor(porta: int | None = None) -> None:
+    """Apaga o marcador; com `porta`, só se ele ainda nomeia essa porta (outro
+    servidor pode tê-lo reescrito)."""
     try:
+        if porta is not None:
+            with open(_arquivo_servidor(), encoding='utf-8') as arquivo:
+                if int(json.load(arquivo)['porta']) != porta:
+                    return
         os.remove(_arquivo_servidor())
-    except OSError:
+    except (OSError, ValueError, KeyError, TypeError):
         pass
+
+
+def _marcador_recente() -> int | None:
+    """Porta do marcador, se ele é mais novo que `_ESPERA_SERVIDOR`: um servidor
+    pode estar subindo (da pasta de rede, sem janela, leva segundos)."""
+    try:
+        caminho = _arquivo_servidor()
+        if time.time() - os.path.getmtime(caminho) > _ESPERA_SERVIDOR:
+            return None
+        with open(caminho, encoding='utf-8') as arquivo:
+            return int(json.load(arquivo)['porta'])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def _esperar_servidor_subindo() -> int | None:
+    """Se há um marcador recente, espera o servidor ficar saudável. Devolve a porta
+    ou None (sem marcador recente, ou nunca ficou saudável)."""
+    porta = _marcador_recente()
+    if porta is None:
+        return None
+    for _ in range(int(_ESPERA_SERVIDOR / _INTERVALO)):
+        if _saudavel(porta):
+            return porta
+        time.sleep(_INTERVALO)
+    return None
 
 
 def _destino_da_saida() -> dict:
@@ -146,6 +178,8 @@ def main():
     os.chdir(_RAIZ)        # .streamlit/config.toml e secrets.toml são lidos daqui
 
     em_execucao = _porta_em_execucao()
+    if not em_execucao:    # clique duplo durante a partida: espera em vez de subir outro
+        em_execucao = _esperar_servidor_subindo()
     if em_execucao:        # segundo clique no atalho: reabre em vez de subir outro
         webbrowser.open(f"http://localhost:{em_execucao}")
         return 0
@@ -172,14 +206,14 @@ def main():
     # gatherUsageStats=false: nada de telemetria saindo da máquina.
     _registrar_servidor(porta)
     try:
-        return subprocess.call([sys.executable, '-m', 'streamlit', 'run', app,
+        return subprocess.call([sys.executable, '-B', '-m', 'streamlit', 'run', app,
                                 '--server.port', str(porta),
                                 '--server.address', '127.0.0.1',
                                 '--server.headless', 'true',
                                 '--browser.gatherUsageStats', 'false',
                                 *sys.argv[1:]], **_destino_da_saida())
     finally:
-        _esquecer_servidor()
+        _esquecer_servidor(porta)
 
 
 if __name__ == "__main__":
