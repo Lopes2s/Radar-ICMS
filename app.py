@@ -1,10 +1,13 @@
 # app.py
 import html
 import io
+import logging
 import os
 import re
 import sqlite3
 import tempfile
+import threading
+import time
 from datetime import datetime
 
 from core.bootstrap import DEPS_APP, garantir_dependencias
@@ -16,12 +19,41 @@ garantir_dependencias(DEPS_APP)
 import streamlit as st  # noqa: E402
 
 from core import (acesso, armazenamento, backup, cnpj, consulta, diagnostico,  # noqa: E402
-                  edicao, log, planilha, trava)
+                  edicao, log, ocioso, planilha, trava)
 from core.execucao import Execucao  # noqa: E402
 from core.pdf_text import MARCA_CITACAO  # noqa: E402
 from interface import design, formularios  # noqa: E402
 
 log.configurar_log(armazenamento.pasta_dados())
+
+# Modo atalho: aberto por Mapeador.vbs (MAPEADOR_MODO_ATALHO=1). Liga o botão
+# Encerrar e o desligamento por ociosidade; fora dele (streamlit run, testes) nada disso existe.
+_MODO_ATALHO = os.environ.get("MAPEADOR_MODO_ATALHO") == "1"
+
+
+def _encerrar_servidor():
+    """Desliga o servidor um instante depois, para a página mostrar o aviso antes."""
+    threading.Timer(1.0, os._exit, args=(0,)).start()
+
+
+@st.cache_resource
+def _vigiar_ociosidade():
+    vigia = ocioso.VigiaOciosidade(ocioso.contar_sessoes_streamlit)
+
+    def laco():
+        while True:
+            time.sleep(30)
+            if vigia.deve_encerrar():
+                logging.getLogger(log.NOME).info(
+                    "Sem navegador conectado: encerrando o servidor.")
+                os._exit(0)
+
+    threading.Thread(target=laco, daemon=True).start()
+    return True
+
+
+if _MODO_ATALHO:
+    _vigiar_ociosidade()
 
 _FORCAR = {"Detectar automaticamente": None,
            "Forçar Consulta": "consulta",
@@ -760,3 +792,8 @@ with st.sidebar:
         for chave in ("perfil", "resultado", "analise", "login_etapa"):
             st.session_state.pop(chave, None)
         st.rerun()
+    if _MODO_ATALHO and st.button("Encerrar ferramenta", key="encerrar",
+                                  icon=":material/power_settings_new:", width="stretch"):
+        st.success("Ferramenta encerrada. Pode fechar esta aba.")
+        _encerrar_servidor()
+        st.stop()

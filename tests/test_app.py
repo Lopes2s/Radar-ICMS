@@ -4,6 +4,7 @@ então o fluxo com PDFs é verificado manualmente (ver plano, Tarefa 11); aqui
 garantimos que a página abre sem erro e mostra o resultado guardado."""
 import io
 import os
+import threading
 import sqlite3
 
 import pytest
@@ -1074,3 +1075,36 @@ def test_gravar_com_falha_no_banco_avisa_mantem_a_analise_e_libera_a_trava(
     assert at.session_state["analise"]
     assert trava.situacao(str(tmp_path)) is None
     assert _regimes_no_banco() == []
+
+
+def test_sem_modo_atalho_nao_ha_botao_encerrar():
+    at = _app("consulta").run(timeout=30)
+    assert not at.exception
+    assert not any(b.key == "encerrar" for b in at.button)
+
+
+def test_botao_encerrar_agenda_o_desligamento(monkeypatch):
+    monkeypatch.setenv("MAPEADOR_MODO_ATALHO", "1")
+    agendados = []
+
+    timer_real = threading.Timer
+
+    class TimerFalso(timer_real):
+        """Só segura o timer do desligamento; os do Streamlit (spinner) rodam normal."""
+        def __init__(self, intervalo, funcao, args=()):
+            super().__init__(intervalo, funcao, args=args)
+            if funcao is os._exit:
+                agendados.append((intervalo, funcao, args))
+
+        def start(self):
+            if self.function is not os._exit:
+                super().start()
+
+    monkeypatch.setattr("threading.Timer", TimerFalso)
+    monkeypatch.setattr("core.ocioso.contar_sessoes_streamlit", lambda: None)
+    at = _app("consulta").run(timeout=30)
+    assert not at.exception
+    at.button(key="encerrar").click().run(timeout=30)
+    assert not at.exception
+    assert [a for a in agendados if a[1] is os._exit] == [(1.0, os._exit, (0,))]
+    assert any("Pode fechar esta aba" in s.value for s in at.success)
