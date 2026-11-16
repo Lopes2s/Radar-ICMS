@@ -14,6 +14,7 @@ def test_atalho_e_ascii_puro_e_roda_sem_janela():
     texto = _vbs()
     assert "pythonw.exe" in texto
     assert re.search(r"\.Run\b.*,\s*0\s*,\s*False", texto)    # estilo 0 = oculto
+    assert 'python & """ -B ' in texto     # -B: o modo isolado ignora PYTHONDONTWRITEBYTECODE
 
 
 def test_atalho_define_o_ambiente_da_rede():

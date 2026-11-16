@@ -350,7 +350,10 @@ navegador desligam o servidor local. Um segundo clique no atalho reabre o que j�
 
 - **Quem grava:** só o Administrador. Uma **trava de importação** (`dados\importando.lock`)
   impede duas gravações ao mesmo tempo e mostra quem está gravando; ela vence em 15 min
-  se a máquina cair. Antes de cada gravação é feito um **backup** (`dados\backups\`, 10 mais recentes).
+  se a máquina cair. Antes de cada importação (**Gravar**) é feito um **backup** (`dados\backups\`, 10 mais recentes);
+  as edições manuais não geram backup, mas ficam no histórico de cada ato (origem `manual`).
+  A linha de comando `processar.py` grava **sem** a trava de importação: não aponte para o banco
+  da rede enquanto outras pessoas usam a ferramenta.
   Para restaurar, feche a ferramenta em todas as máquinas e substitua `mapeamento.db` por uma cópia.
 - **Perfil Consulta:** abre o banco somente leitura. Se o banco ainda não existe ou foi
   atualizado por uma versão nova, a tela pede ao Administrador abrir a ferramenta primeiro.

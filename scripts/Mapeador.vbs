@@ -26,4 +26,4 @@ ambiente("MAPEADOR_SEM_AUTOINSTALL") = "1"              ' nunca tenta instalar p
 ambiente("PYTHONDONTWRITEBYTECODE") = "1"               ' varios usuarios, uma pasta: sem .pyc
 
 ' 0 = janela oculta; False = nao espera terminar
-sh.Run """" & python & """ """ & raiz & "\app\iniciar.py""", 0, False
+sh.Run """" & python & """ -B """ & raiz & "\app\iniciar.py""", 0, False

@@ -7,6 +7,7 @@
 - Botão **Encerrar ferramenta** e desligamento automático do servidor local após 10 min sem navegador (só no atalho).
 - Gravar (importação ou edição manual) **espera até 60 s** a vez quando outra pessoa está gravando (`MAPEADOR_ESPERA_TRAVA_S`). `montar_rede.ps1` recusa atualizar com a ferramenta em uso.
 - Um segundo clique no atalho reabre o servidor já aberto; falhas de inicialização sem console aparecem numa caixa de mensagem. O log do atalho fica na máquina de cada usuário (`MAPEADOR_LOGS`).
+- Robustez: pasta de rede fora do ar vira mensagem (não mais erro técnico), inclusive nas edições do detalhe; a trava tenta de novo ao ser removida quando o Windows a mantém aberta; clique duplo durante a partida espera o servidor em vez de subir outro. O backup cobre a importação (Gravar); edições manuais ficam no histórico por ato; `processar.py` grava sem a trava. Atalho com `python -B` (sem `.pyc` na pasta de rede).
 - Schema do banco inalterado (4).
 
 ## 0.9.1

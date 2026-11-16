@@ -61,7 +61,7 @@ Expand-Archive $zipCodigo -DestinationPath $app -Force
 # 2. Python portatil (embeddable), so na primeira vez.
 if (-not (Test-Path (Join-Path $py "python.exe"))) {
     $zipPython = Join-Path $tmp "python-embed.zip"
-    Invoke-WebRequest "https://www.python.org/ftp/python/$VersaoPython/python-$VersaoPython-embed-amd64.zip" -OutFile $zipPython
+    Invoke-WebRequest -UseBasicParsing "https://www.python.org/ftp/python/$VersaoPython/python-$VersaoPython-embed-amd64.zip" -OutFile $zipPython
     Expand-Archive $zipPython -DestinationPath $py -Force
 
     # O ._pth restringe o sys.path: inclui a pasta do codigo (..), o site-packages e o site.
@@ -70,7 +70,7 @@ if (-not (Test-Path (Join-Path $py "python.exe"))) {
         "$($pth.BaseName).zip", ".", "..", "Lib\site-packages", "import site")
 
     $getPip = Join-Path $tmp "get-pip.py"
-    Invoke-WebRequest "https://bootstrap.pypa.io/get-pip.py" -OutFile $getPip
+    Invoke-WebRequest -UseBasicParsing "https://bootstrap.pypa.io/get-pip.py" -OutFile $getPip
     & (Join-Path $py "python.exe") $getPip --no-warn-script-location
     if ($LASTEXITCODE -ne 0) { throw "Falha no passo 2: instalacao do pip (get-pip.py)." }
 }
