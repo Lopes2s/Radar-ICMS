@@ -76,7 +76,6 @@ if ($LASTEXITCODE -ne 0) { throw "Falha no passo 5: tar.exe nao gerou o pacote."
 $destinoPacote = Join-Path $programa "programa-$versao.zip"
 Copy-Item $zipPacote "$destinoPacote.tmp" -Force
 Move-Item "$destinoPacote.tmp" $destinoPacote -Force
-Copy-Item (Join-Path $raizRepo "scripts\atualizar_local.ps1") (Join-Path $programa "atualizar_local.ps1") -Force
 Set-Content (Join-Path $programa "versao.txt") -Value $versao -Encoding ascii
 # pacotes de versoes anteriores (quem ainda estiver lendo um deles pode impedir a remocao: ignora)
 Get-ChildItem $programa -Filter "programa-*.zip" | Where-Object { $_.Name -ne "programa-$versao.zip" } |

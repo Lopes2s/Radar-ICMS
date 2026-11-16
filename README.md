@@ -336,7 +336,7 @@ rede é inviável (minutos para abrir): por isso o `Radar ICMS.vbs` baixa o paco
 ```
 \\rede\Radar ICMS\
   Radar ICMS.vbs    duplo clique, sem janela de console
-  programa\         programa-<versão>.zip (código + Python portátil), versao.txt, atualizar_local.ps1
+  programa\         programa-<versão>.zip (código + Python portátil), versao.txt
   dados\            mapeamento.db e backups\
 ```
 
