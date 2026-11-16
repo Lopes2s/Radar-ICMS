@@ -168,3 +168,34 @@ def test_falha_na_escrita_nao_deixa_trava_vazia(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError):
         trava.adquirir(str(tmp_path), "ana", "PC-01", agora=T0)
     assert not (tmp_path / trava.NOME_ARQUIVO).exists()
+
+
+def test_liberar_tenta_de_novo_em_permission_error(tmp_path, monkeypatch):
+    trava.adquirir(str(tmp_path), "ana", "PC-01")
+    real = os.remove
+    falhas = {"n": 2}
+
+    def remove(caminho):
+        if falhas["n"]:
+            falhas["n"] -= 1
+            raise PermissionError(32, "em uso")
+        real(caminho)
+
+    monkeypatch.setattr(trava.os, "remove", remove)
+    esperas = []
+    assert trava.liberar(str(tmp_path), "ana", "PC-01", dormir=esperas.append) is True
+    assert len(esperas) == 2
+    assert trava.situacao(str(tmp_path)) is None
+
+
+def test_liberar_desiste_depois_das_tentativas(tmp_path, monkeypatch):
+    trava.adquirir(str(tmp_path), "ana", "PC-01")
+    chamadas = []
+
+    def remove(caminho):
+        chamadas.append(caminho)
+        raise PermissionError(32, "em uso")
+
+    monkeypatch.setattr(trava.os, "remove", remove)
+    assert trava.liberar(str(tmp_path), "ana", "PC-01", dormir=lambda s: None) is False
+    assert len(chamadas) == 10

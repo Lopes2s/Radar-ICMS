@@ -57,11 +57,23 @@ def _ocupado(agora: datetime) -> Importacao:
     return Importacao("alguém", "outra máquina", agora, agora)
 
 
-def _remover(caminho: str) -> None:
-    try:
-        os.remove(caminho)
-    except OSError:
-        pass
+def _remover(caminho: str, dormir=time.sleep, tentativas: int = 10,
+             intervalo_s: float = 0.2) -> bool:
+    """Remove o arquivo. No Windows, outro processo com o arquivo aberto (ex.: quem
+    espera e consulta a trava) dá PermissionError por instantes: tenta de novo.
+    Devolve se o arquivo já não existe."""
+    for n in range(tentativas):
+        try:
+            os.remove(caminho)
+            return True
+        except FileNotFoundError:
+            return True
+        except PermissionError:
+            if n < tentativas - 1:
+                dormir(intervalo_s)
+        except OSError:
+            return False
+    return False
 
 
 def _mtime(caminho: str) -> datetime | None:
@@ -175,16 +187,12 @@ def adquirir(pasta: str, quem: str, maquina: str, agora: datetime | None = None,
     return _retomar(pasta, quem, maquina, agora, validade)
 
 
-def liberar(pasta: str, quem: str, maquina: str) -> bool:
+def liberar(pasta: str, quem: str, maquina: str, dormir=time.sleep) -> bool:
     """Remove a trava SE for de `quem`/`maquina`. Devolve se removeu."""
     atual = situacao(pasta, validade=timedelta.max)
     if atual is None or (atual.quem, atual.maquina) != (quem, maquina):
         return False
-    try:
-        os.remove(_caminho(pasta))
-    except OSError:
-        return False
-    return True
+    return _remover(_caminho(pasta), dormir)
 
 
 @contextmanager
