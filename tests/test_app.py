@@ -4,12 +4,14 @@ então o fluxo com PDFs é verificado manualmente (ver plano, Tarefa 11); aqui
 garantimos que a página abre sem erro e mostra o resultado guardado."""
 import io
 import os
+import sqlite3
 
 import pytest
 
 pytest.importorskip("streamlit")
 from streamlit.testing.v1 import AppTest  # noqa: E402
-from core import acesso, armazenamento, diagnostico, edicao, pipeline  # noqa: E402
+from core import (acesso, armazenamento, backup, diagnostico, edicao,  # noqa: E402
+                  pipeline, trava)
 from interface import formularios  # noqa: E402
 
 APP = os.path.join(os.path.dirname(os.path.dirname(__file__)), "app.py")
@@ -26,8 +28,14 @@ def _isola_banco(monkeypatch, tmp_path):
     de armazenamento.conectar() e escreve no mapeamento.db real do
     projeto (achado na revisão final do branch: rodar a suíte criava/
     alterava esse arquivo fora de qualquer sandbox de teste).
+
+    O banco é criado aqui, como o Administrador faria ao abrir a ferramenta:
+    o perfil Consulta só lê e não cria o arquivo.
     """
-    monkeypatch.setenv("MAPEADOR_BANCO", str(tmp_path / "app_teste.db"))
+    caminho = tmp_path / "app_teste.db"
+    monkeypatch.setenv("MAPEADOR_BANCO", str(caminho))
+    with armazenamento.sessao(str(caminho)):
+        pass
 
 
 def _app(perfil="admin"):
@@ -951,3 +959,118 @@ def test_gravar_com_a_consulta_desligada_nao_chama_a_rede(monkeypatch):
     at.button(key="gravar").click().run(timeout=30)
     assert not at.exception
     assert rede.urls == [] and len(_regimes_no_banco()) == 1
+
+
+def test_consulta_sem_banco_avisa_sem_criar_o_arquivo(tmp_path):
+    caminho = tmp_path / "app_teste.db"
+    caminho.unlink()                     # a fixture criou; aqui a rede está sem banco
+    at = _app("consulta").run(timeout=30)
+    assert not at.exception
+    assert any("ainda não existe" in e.value for e in at.error)
+    assert not caminho.exists()
+
+
+def test_consulta_com_banco_de_schema_antigo_pede_ao_administrador(tmp_path):
+    caminho = tmp_path / "app_teste.db"
+    conn = sqlite3.connect(str(caminho))
+    conn.execute("PRAGMA user_version = 1")
+    conn.commit()
+    conn.close()
+    at = _app("consulta").run(timeout=30)
+    assert not at.exception
+    assert any("Administrador" in e.value for e in at.error)
+
+
+def test_gravar_avisa_quem_esta_gravando_e_desiste_depois_da_espera(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAPEADOR_ESPERA_TRAVA_S", "0")
+    assert trava.adquirir(str(tmp_path), "maria", "PC-02") is None
+    at = _app("admin")
+    at.session_state["analise"] = _analise_com(_lote_sem_vigencia())
+    at.run(timeout=30)
+    assert not at.exception
+    assert not at.button(key="gravar").disabled          # o botão espera a vez, não bloqueia
+    assert any("maria (PC-02) está gravando" in w.value for w in at.warning)
+    at.button(key="gravar").click().run(timeout=30)
+    assert not at.exception
+    assert any("maria (PC-02) está gravando" in e.value for e in at.error)
+    assert at.session_state["analise"]                   # a análise continua na tela
+    assert _regimes_no_banco() == []
+    assert trava.situacao(str(tmp_path)).quem == "maria"  # não soltou a trava alheia
+
+
+def test_edicao_manual_espera_a_trava_e_avisa_quem_grava(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAPEADOR_ESPERA_TRAVA_S", "0")
+    at = _abre_o_detalhe_do_regime("admin")
+    trava.adquirir(str(tmp_path), "maria", "PC-02")
+    _linha_0(at)
+    at.button(key="editar-registro").click().run(timeout=30)
+    at.text_input(key=f"{PREFIXO}|VIGÊNCIA DO RE").input("12 meses")
+    _linha_0(at)
+    at.button(key=f"{PREFIXO}|enviar").click().run(timeout=30)
+    assert not at.exception
+    assert _regimes_no_banco()[0]['VIGÊNCIA DO RE'] != '12 meses'
+    # o detalhe consome "erro_edicao" ao desenhar o aviso: confere o que ficou na tela
+    assert any("maria (PC-02) está gravando" in e.value for e in at.error)
+
+
+def test_edicao_manual_sem_ninguem_gravando_edita_e_solta_a_trava(tmp_path):
+    at = _abre_o_detalhe_do_regime("admin")
+    _linha_0(at)
+    at.button(key="editar-registro").click().run(timeout=30)
+    at.text_input(key=f"{PREFIXO}|VIGÊNCIA DO RE").input("12 meses")
+    _linha_0(at)
+    at.button(key=f"{PREFIXO}|enviar").click().run(timeout=30)
+    assert not at.exception
+    assert _regimes_no_banco()[0]['VIGÊNCIA DO RE'] == '12 meses'
+    assert trava.situacao(str(tmp_path)) is None
+
+
+def test_aplicar_cnae_espera_a_trava_e_avisa_quem_grava(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAPEADOR_ESPERA_TRAVA_S", "0")
+    _guarda_receita()
+    at = _abre_o_detalhe_do_regime("admin")
+    trava.adquirir(str(tmp_path), "maria", "PC-02")
+    _linha_0(at)
+    at.button(key="aplicar-cnae").click().run(timeout=30)
+    assert not at.exception
+    assert _regimes_no_banco()[0]['CNAE REQUERENTE'] != '6422-1/00'
+    assert any("maria (PC-02) está gravando" in t.value for t in at.toast)
+
+
+def test_consultar_cnpj_espera_a_trava_e_nao_chama_a_rede(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAPEADOR_ESPERA_TRAVA_S", "0")
+    rede = _com_rede(monkeypatch)
+    at = _abre_o_detalhe_do_regime("admin")
+    trava.adquirir(str(tmp_path), "maria", "PC-02")
+    _linha_0(at)
+    at.button(key="consultar-cnpj").click().run(timeout=30)
+    assert not at.exception
+    assert rede.urls == []
+    assert any("maria (PC-02) está gravando" in t.value for t in at.toast)
+
+
+def test_gravar_faz_backup_antes_e_libera_a_trava(tmp_path):
+    at = _app("admin")
+    at.session_state["analise"] = _analise_com(_lote_sem_vigencia())
+    at.run(timeout=30)
+    at.button(key="gravar").click().run(timeout=30)
+    assert not at.exception
+    assert len(list((tmp_path / "backups").glob("mapeamento-*.db"))) == 1
+    assert trava.situacao(str(tmp_path)) is None
+    assert len(_regimes_no_banco()) == 1
+
+
+def test_gravar_com_falha_no_banco_avisa_mantem_a_analise_e_libera_a_trava(
+        monkeypatch, tmp_path):
+    def estoura(*a, **k):
+        raise sqlite3.OperationalError("database is locked")
+    monkeypatch.setattr(backup, "fazer_backup", estoura)
+    at = _app("admin")
+    at.session_state["analise"] = _analise_com(_lote_sem_vigencia())
+    at.run(timeout=30)
+    at.button(key="gravar").click().run(timeout=30)
+    assert not at.exception
+    assert any("Não foi possível gravar" in e.value for e in at.error)
+    assert at.session_state["analise"]
+    assert trava.situacao(str(tmp_path)) is None
+    assert _regimes_no_banco() == []
