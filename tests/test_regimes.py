@@ -222,3 +222,56 @@ def test_jaguafrangos_disposicoes_gerais_com_rotulo_com_complemento():
     assert disposicoes.startswith("3.1. Sujeita-se à apresentação")
     assert "RO-e" in disposicoes
     assert "firmam este instrumento" not in disposicoes
+
+
+# Regressão (autoreview 2026-11-15): o Regime Especial nº 8.715/2025 real traz
+# "CAD/ICMS :61700643-03" com espaço antes dos dois-pontos. Os regex exigiam
+# "CAD/ICMS:" colado, então a EMPRESA saía com o rótulo grudado e o CAD/ICMS
+# ficava vazio, sem nenhum diagnóstico.
+
+def test_jaguafrangos_empresa_e_cad_icms_com_espaco_antes_dos_dois_pontos():
+    r = regimes.parse(_JAGUAFRANGOS_REAL)[0][0]
+    assert r["EMPRESA"] == "JAGUAFRANGOS IND. E COM. DE ALIMENTOS LTDA"
+    assert r["CAD/ICMS"] == "61700643-03"
+    assert r["CNPJ REQUERENTE"] == "85.090.033/0001-22"
+
+
+def _bloco(cabecalho_dados: str) -> str:
+    return (
+        "INSPETORIA GERAL DE FISCALIZAÇÃO\n"
+        "REGIME ESPECIAL Nº 1/2026\n"
+        + cabecalho_dados +
+        "EMENTA: Algo.\n"
+        "Diante do previsto no Parecer, concede-se.\n"
+    )
+
+
+def test_cnpj_com_espaco_antes_dos_dois_pontos():
+    texto = _bloco("BENEFICIÁRIA: ACME LTDA\n"
+                   "CAD/ICMS: 12345678-90 CNPJ : 11.222.333/0001-81\n")
+    r = regimes.parse(texto)[0][0]
+    assert r["EMPRESA"] == "ACME LTDA"
+    assert r["CNPJ REQUERENTE"] == "11.222.333/0001-81"
+
+
+def test_beneficiaria_e_ementa_com_espaco_antes_dos_dois_pontos_nao_viram_descarte():
+    texto = (
+        "INSPETORIA GERAL DE FISCALIZAÇÃO\n"
+        "REGIME ESPECIAL Nº 2/2026\n"
+        "BENEFICIÁRIA : ACME LTDA\n"
+        "CNPJ: 11.222.333/0001-81\n"
+        "EMENTA : Algo.\n"
+        "Diante do previsto no Parecer, concede-se.\n"
+    )
+    registros, descartes = regimes.parse(texto)
+    assert len(registros) == 1 and descartes == []
+    assert registros[0]["EMPRESA"] == "ACME LTDA"
+    assert registros[0]["EMENTA"] == "Algo."
+
+
+def test_regime_sem_cad_icms_mantem_empresa_limpa_e_cad_icms_vazio():
+    texto = _bloco("BENEFICIÁRIA: ACME LTDA\n"
+                   "CNPJ: 11.222.333/0001-81\n")
+    r = regimes.parse(texto)[0][0]
+    assert r["EMPRESA"] == "ACME LTDA"
+    assert r["CAD/ICMS"] == ""

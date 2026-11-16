@@ -51,7 +51,7 @@ def _data_edicao_iso(txt: str) -> str:
 
 
 def _campo(fatia: str, rotulo: str) -> str:
-    m = re.search(rf'{rotulo}:\s*(.+)', fatia, re.IGNORECASE)
+    m = re.search(rf'{rotulo}\s*:\s*(.+)', fatia, re.IGNORECASE)
     return m.group(1).strip() if m else ""
 
 
@@ -60,7 +60,8 @@ def _campo(fatia: str, rotulo: str) -> str:
 # teto, um rótulo distante puxaria parágrafos inteiros). Sem rótulo dentro
 # desse alcance, cai no comportamento de uma linha.
 _BENEFICIARIA = re.compile(
-    r'BENEFICI[ÁA]RIA:\s*(.{1,200}?)\s*(?=CAD/ICMS:|CNPJ:|ENDERE[ÇC]O:|EMENTA:)',
+    r'BENEFICI[ÁA]RIA\s*:\s*(.{1,200}?)\s*'
+    r'(?=CAD/ICMS\s*:|CNPJ\s*:|ENDERE[ÇC]O\s*:|EMENTA\s*:)',
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -72,18 +73,18 @@ def _beneficiaria(fatia: str) -> str:
 
 
 def _cnpj(fatia: str) -> str:
-    m = re.search(r'CNPJ:\s*([\d\.\/-]+)', fatia, re.IGNORECASE)
+    m = re.search(r'CNPJ\s*:\s*([\d\.\/-]+)', fatia, re.IGNORECASE)
     return m.group(1).strip() if m else ""
 
 
 def _cad_icms(fatia: str) -> str:
-    m = re.search(r'CAD/ICMS:\s*([\d\.\-]+)', fatia, re.IGNORECASE)
+    m = re.search(r'CAD/ICMS\s*:\s*([\d\.\-]+)', fatia, re.IGNORECASE)
     return m.group(1).strip() if m else ""
 
 
 def _ementa(fatia: str) -> str:
     m = re.search(
-        r'EMENTA:\s*(.+?)(?:Diante do previsto|A Diretora|O Diretor|'
+        r'EMENTA\s*:\s*(.+?)(?:Diante do previsto|A Diretora|O Diretor|'
         r'\n\s*1\.\s|\n\s*\d+\.\s*O\s|\Z)',
         fatia, re.DOTALL | re.IGNORECASE,
     )
@@ -101,8 +102,8 @@ def _vigencia(fatia: str) -> str:
 
 
 def _classifica(fatia: str) -> str:
-    tem_beneficiaria = re.search(r'BENEFICI[ÁA]RIA:', fatia, re.IGNORECASE)
-    tem_ementa = re.search(r'EMENTA:', fatia, re.IGNORECASE)
+    tem_beneficiaria = re.search(r'BENEFICI[ÁA]RIA\s*:', fatia, re.IGNORECASE)
+    tem_ementa = re.search(r'EMENTA\s*:', fatia, re.IGNORECASE)
     eh_revogacao = re.search(r'DESPACHO\s+N[ºo°].*?Revog', fatia,
                              re.IGNORECASE | re.DOTALL)
     if eh_revogacao and not tem_beneficiaria:
