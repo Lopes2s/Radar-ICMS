@@ -180,14 +180,11 @@ If Not Atualizada() Then
     If Not (aviso Is Nothing) Then aviso.Terminate
     On Error GoTo 0
 
-    ' 3 = copia local em uso por outra sessao: segue com ela (o iniciar.py reabre o servidor).
-    If resultado <> 0 And resultado <> 3 Then
+    ' 3 = copia local em uso por outra sessao; qualquer falha com uma copia local que
+    ' funciona: segue com ela (o motivo fica em atualizacao.log). Sem copia local, nao ha o que abrir.
+    If Not fso.FileExists(python) Then
         MsgBox "Nao foi possivel preparar o Radar ICMS neste computador." & vbCrLf & vbCrLf & _
                "Detalhes em:" & vbCrLf & base & "\atualizacao.log", 16, TITULO
-        WScript.Quit 1
-    End If
-    If Not fso.FileExists(python) Then
-        MsgBox "Python local nao encontrado em:" & vbCrLf & python, 16, TITULO
         WScript.Quit 1
     End If
 End If
