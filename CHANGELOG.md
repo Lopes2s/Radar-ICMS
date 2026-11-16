@@ -1,7 +1,7 @@
 # Histórico de versões
 
 ## 0.10.0
-- **Compartilhamento pela rede**: código, Python portátil e banco ficam numa pasta de rede; cada pessoa abre por `Mapeador.vbs` (sem janela de console, sem instalar nada) e vê o mesmo banco. `scripts/montar_rede.ps1` monta e atualiza a pasta.
+- **Compartilhamento pela rede**: código, Python portátil e banco ficam numa pasta de rede; cada pessoa abre por `Radar ICMS.vbs` (sem janela de console, sem instalar nada) e vê o mesmo banco. `scripts/montar_rede.ps1` monta e atualiza a pasta.
 - O perfil **Consulta** abre o banco **somente leitura** (nunca cria nem migra o arquivo); se o banco não existe ou é de versão antiga, a tela pede ao Administrador abrir a ferramenta.
 - **Gravar** passa a usar uma **trava de importação** (`importando.lock`, vence em 15 min): quem tenta gravar enquanto outra pessoa grava vê o nome e o horário. Antes de cada gravação é feito um **backup** em `backups/` (10 mais recentes). Conexões esperam até 30 s por bloqueio.
 - Botão **Encerrar ferramenta** e desligamento automático do servidor local após 10 min sem navegador (só no atalho).

@@ -2,7 +2,7 @@ import os
 import re
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VBS = os.path.join(RAIZ, "scripts", "Mapeador.vbs")
+VBS = os.path.join(RAIZ, "scripts", "Radar ICMS.vbs")
 
 
 def _vbs() -> str:
@@ -31,7 +31,7 @@ def test_script_de_montagem_existe_e_instala_do_requirements():
         texto = arquivo.read()
     assert "requirements.txt" in texto
     assert "git" in texto and "archive" in texto
-    assert "Mapeador.vbs" in texto
+    assert "Radar ICMS.vbs" in texto
 
 
 def test_script_de_montagem_recusa_atualizar_com_a_ferramenta_em_uso():

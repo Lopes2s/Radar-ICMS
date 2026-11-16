@@ -1,4 +1,4 @@
-# Mapeador de Consultas e Regimes Especiais — PR
+# Radar ICMS — Consultas e Regimes Especiais (PR)
 
 Ferramenta local que lê PDFs da SEFA-PR (consultas tributárias) e do Diário
 Oficial (regimes especiais), extrai os campos objetivos, mapeia tudo num banco
@@ -281,7 +281,7 @@ o mesmo caminho — `Execucao` → `pipeline` → `armazenamento`.
 | `processar.py` | linha de comando |
 | `iniciar.py` | abre a interface preparando o ambiente antes |
 | `Mapeador.bat` | atalho de duplo clique para `iniciar.py` |
-| `scripts/Mapeador.vbs` | atalho de rede, sem janela de console |
+| `scripts/Radar ICMS.vbs` | atalho de rede, sem janela de console |
 | `scripts/montar_rede.ps1` | monta e atualiza a pasta de rede (Python portátil + dependências) |
 | `interface/design.py` | Design System Martinelli: tokens claro/escuro, CSS dos componentes e blocos de HTML (marca, cabeçalho, estado vazio) |
 | `interface/icones.py` | ícones do showcase usados nos indicadores e cartões |
@@ -332,8 +332,8 @@ Uma pasta de rede acessível a todos guarda tudo; cada pessoa roda o servidor na
 própria máquina (`127.0.0.1`) e lê/grava o mesmo banco.
 
 ```
-\\rede\Mapeador\
-  Mapeador.vbs      duplo clique, sem janela de console
+\\rede\Radar ICMS\
+  Radar ICMS.vbs    duplo clique, sem janela de console
   app\              código + python\ (Python portátil com as dependências)
   dados\            mapeamento.db e backups\
 ```
@@ -341,10 +341,10 @@ própria máquina (`127.0.0.1`) e lê/grava o mesmo banco.
 **Montar ou atualizar** (por quem mantém a ferramenta, com internet, na raiz do repositório):
 
 ```powershell
-.\scripts\montar_rede.ps1 -Destino \\servidor\pasta\Mapeador
+.\scripts\montar_rede.ps1 -Destino "\\servidor\pasta\Radar ICMS"
 ```
 
-Cada usuário cria um atalho para `Mapeador.vbs` na área de trabalho. A janela do
+Cada usuário cria um atalho para `Radar ICMS.vbs` na área de trabalho. A janela do
 navegador abre sozinha; **Encerrar ferramenta** (barra lateral) ou 10 minutos sem
 navegador desligam o servidor local. Um segundo clique no atalho reabre o que já está aberto.
 

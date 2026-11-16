@@ -1,5 +1,5 @@
-' Mapeador Tributario PR - atalho de duplo clique, sem janela de console.
-' Fica na raiz da pasta de rede:  Mapeador.vbs, app\ (codigo + python\), dados\
+' Radar ICMS - atalho de duplo clique, sem janela de console.
+' Fica na raiz da pasta de rede:  Radar ICMS.vbs, app\ (codigo + python\), dados\
 Option Explicit
 
 Dim sh, fso, raiz, python, local, ambiente
@@ -12,7 +12,7 @@ python = raiz & "\app\python\pythonw.exe"
 If Not fso.FileExists(python) Then
     MsgBox "Python portatil nao encontrado em:" & vbCrLf & python & vbCrLf & vbCrLf & _
            "Peca a quem mantem a ferramenta para rodar scripts\montar_rede.ps1.", 16, _
-           "Mapeador Tributario PR"
+           "Radar ICMS"
     WScript.Quit 1
 End If
 

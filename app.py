@@ -29,7 +29,7 @@ try:
 except OSError:      # pasta de rede fora do ar: a tela de erro abaixo ainda precisa aparecer
     pass
 
-# Modo atalho: aberto por Mapeador.vbs (MAPEADOR_MODO_ATALHO=1). Liga o botão
+# Modo atalho: aberto por Radar ICMS.vbs (MAPEADOR_MODO_ATALHO=1). Liga o botão
 # Encerrar e o desligamento por ociosidade; fora dele (streamlit run, testes) nada disso existe.
 _MODO_ATALHO = os.environ.get("MAPEADOR_MODO_ATALHO") == "1"
 
@@ -105,7 +105,7 @@ def _sessao_do_perfil(perfil_atual):
 
 
 # Visual: Design System Martinelli (interface/design.py + .streamlit/config.toml).
-st.set_page_config(page_title="Mapeador Tributário PR", page_icon="⚖️",
+st.set_page_config(page_title="Radar ICMS", page_icon="⚖️",
                    layout="wide")
 design.injetar_tema()
 
@@ -573,7 +573,7 @@ def _login_escolha(senha_configurada: bool):
     """Etapa 1: escolher o perfil. Consulta entra direto; Administrador segue
     para a etapa da senha (e fica desabilitado se a senha não estiver
     configurada — nunca cai em acesso aberto)."""
-    design.cabecalho_login("Mapeador Tributário PR", "Como deseja entrar?",
+    design.cabecalho_login("Radar ICMS", "Como deseja entrar?",
                            "Escolha o perfil para continuar.")
     if st.button("Consulta", key="entrar-consulta", type="primary",
                  icon=":material/search:", width="stretch"):
@@ -628,7 +628,7 @@ if perfil not in (acesso.PERFIL_CONSULTA, acesso.PERFIL_ADMIN):
     st.stop()
 
 with st.sidebar:
-    design.marca_lateral("Mapeador Tributário PR")
+    design.marca_lateral("Radar ICMS")
 
 try:
     with _sessao_do_perfil(perfil):

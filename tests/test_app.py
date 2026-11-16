@@ -540,7 +540,7 @@ def test_pagina_injeta_o_tema_e_a_marca_martinelli():
     assert not at.exception
     textos = [m.value for m in at.markdown]
     assert any("--primary: #1C62CB" in t and "<style>" in t for t in textos)
-    assert any("Martinelli Advogados" in t and "Mapeador Tribut" in t for t in textos)
+    assert any("Martinelli Advogados" in t and "Radar ICMS" in t for t in textos)
 
 
 def test_consultar_mostra_os_indicadores_do_banco():

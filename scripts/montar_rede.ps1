@@ -1,12 +1,12 @@
 <#
 .SYNOPSIS
-  Monta (ou atualiza) a pasta de rede do Mapeador.
+  Monta (ou atualiza) a pasta de rede do Radar ICMS.
 
 .EXAMPLE
-  .\scripts\montar_rede.ps1 -Destino \\servidor\arquivos\Mapeador
+  .\scripts\montar_rede.ps1 -Destino "\\servidor\arquivos\Radar ICMS"
 
   Cria Destino\app (codigo + Python portatil com as dependencias), Destino\dados e
-  Destino\Mapeador.vbs. Rodar de novo atualiza o codigo e as dependencias e
+  Destino\Radar ICMS.vbs. Rodar de novo atualiza o codigo e as dependencias e
   preserva dados\, app\python\ e app\.streamlit\secrets.toml.
   Requer internet na maquina de quem monta (Python, pip e dependencias).
   Recusa atualizar se a ferramenta estiver em uso em qualquer maquina (o Windows trava
@@ -80,9 +80,9 @@ if (-not (Test-Path (Join-Path $py "python.exe"))) {
 if ($LASTEXITCODE -ne 0) { throw "Falha no passo 3: pip install -r requirements.txt." }
 
 # 4. Atalho na raiz da pasta de rede.
-Copy-Item (Join-Path $raizRepo "scripts\Mapeador.vbs") (Join-Path $Destino "Mapeador.vbs") -Force
+Copy-Item (Join-Path $raizRepo "scripts\Radar ICMS.vbs") (Join-Path $Destino "Radar ICMS.vbs") -Force
 
 # 5. Teste de fumaca: as bibliotecas importam no Python portatil.
 & (Join-Path $py "python.exe") -c "import streamlit, pdfplumber, openpyxl; print('Python portatil OK')"
 if ($LASTEXITCODE -ne 0) { throw "Falha no passo 5: teste de fumaca do Python portatil." }
-Write-Host "Pronto: $Destino. Peca aos usuarios para criarem um atalho para Mapeador.vbs na area de trabalho."
+Write-Host "Pronto: $Destino. Peca aos usuarios para criarem um atalho para Radar ICMS.vbs na area de trabalho."

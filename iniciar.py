@@ -9,7 +9,7 @@ Roda em modo headless de propósito. Fora dele, o streamlit faz uma pergunta
 interativa de e-mail na primeira execução, que trava quem abre por duplo-clique
 no .bat. Em troca, somos nós que abrimos o navegador.
 
-Sem console (pythonw.exe, pelo Mapeador.vbs): a saída do servidor vai para um
+Sem console (pythonw.exe, pelo Radar ICMS.vbs): a saída do servidor vai para um
 arquivo e erros de inicialização aparecem numa caixa de mensagem.
 
     python iniciar.py
@@ -125,7 +125,7 @@ def _destino_da_saida() -> dict:
 
 def _caixa_de_mensagem(texto: str) -> None:
     import ctypes
-    ctypes.windll.user32.MessageBoxW(0, texto, 'Mapeador Tributário PR', 0x10)
+    ctypes.windll.user32.MessageBoxW(0, texto, 'Radar ICMS', 0x10)
 
 
 def _avisar_erro(texto: str) -> None:

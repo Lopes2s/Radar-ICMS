@@ -1,14 +1,14 @@
 @echo off
-REM Mapeador Tributario PR - clique duas vezes para abrir a interface.
+REM Radar ICMS - clique duas vezes para abrir a interface.
 REM Esta janela e o servidor: fecha-la (ou Ctrl+C) encerra a ferramenta.
 
 chcp 65001 >nul 2>&1
-title Mapeador Tributario PR
+title Radar ICMS
 cd /d "%~dp0"
 set "PYTHONIOENCODING=utf-8"
 
 echo.
-echo   Mapeador de Consultas e Regimes Especiais - PR
+echo   Radar ICMS - Consultas e Regimes Especiais (PR)
 echo   ---------------------------------------------
 echo   Abrindo no navegador... a janela pode demorar alguns segundos.
 echo   Mantenha ESTA janela aberta enquanto usar a ferramenta.
