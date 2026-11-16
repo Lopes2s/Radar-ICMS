@@ -106,3 +106,65 @@ def test_texto_mostra_quem_e_a_hora_local(tmp_path):
     assert texto.startswith("ana (PC-01) está gravando desde ")
     hora = texto.rsplit(" ", 1)[1]
     assert len(hora) == 5 and hora[2] == ":"
+
+
+def _ana_vencida(tmp_path):
+    trava.adquirir(str(tmp_path), "ana", "PC-01", agora=T0)
+    return T0 + trava.VALIDADE_PADRAO + timedelta(seconds=1)
+
+
+def test_retomada_de_trava_vencida_nao_deixa_mutex(tmp_path):
+    depois = _ana_vencida(tmp_path)
+    assert trava.adquirir(str(tmp_path), "bia", "PC-02", agora=depois) is None
+    assert trava.situacao(str(tmp_path), agora=depois).quem == "bia"
+    assert not (tmp_path / trava.NOME_RETOMADA).exists()
+
+
+def test_mutex_recente_torna_a_retomada_ocupada_sem_mexer_na_trava(tmp_path):
+    depois = _ana_vencida(tmp_path)
+    (tmp_path / trava.NOME_RETOMADA).write_text("", encoding="utf-8")
+    outro = trava.adquirir(str(tmp_path), "bia", "PC-02", agora=depois)
+    assert outro is not None
+    assert (tmp_path / trava.NOME_ARQUIVO).exists()
+    assert (tmp_path / trava.NOME_ARQUIVO).read_text(encoding="utf-8").count('"ana"') == 1
+    assert (tmp_path / trava.NOME_RETOMADA).exists()    # não é nosso: intacto
+
+
+def test_mutex_antigo_e_removido_e_a_retomada_funciona(tmp_path):
+    depois = _ana_vencida(tmp_path)
+    mutex = tmp_path / trava.NOME_RETOMADA
+    mutex.write_text("", encoding="utf-8")
+    antigo = (datetime.now(timezone.utc) - timedelta(seconds=60)).timestamp()
+    os.utime(mutex, (antigo, antigo))
+    assert trava.adquirir(str(tmp_path), "bia", "PC-02", agora=depois) is None
+    assert trava.situacao(str(tmp_path), agora=depois).quem == "bia"
+    assert not mutex.exists()
+
+
+def test_corrida_na_retomada_devolve_quem_ganhou(tmp_path, monkeypatch):
+    depois = _ana_vencida(tmp_path)
+    vivo = trava.Importacao("carlos", "PC-03", depois, depois)
+    respostas = iter([None, vivo])        # 1ª leitura: vencida; releitura no mutex: já retomada
+    monkeypatch.setattr(trava, "situacao", lambda *a, **k: next(respostas))
+    outro = trava.adquirir(str(tmp_path), "bia", "PC-02", agora=depois)
+    assert outro == vivo
+    assert (tmp_path / trava.NOME_ARQUIVO).exists()     # não foi removida
+    assert not (tmp_path / trava.NOME_RETOMADA).exists()
+
+
+def test_trava_com_datas_sem_fuso_conta_como_ocupada(tmp_path):
+    caminho = tmp_path / trava.NOME_ARQUIVO
+    caminho.write_text(
+        '{"quem": "ana", "maquina": "PC-01", "desde": "2026-11-16T14:00:00", '
+        '"renovado_em": "2026-11-16T14:00:00"}', encoding="utf-8")
+    assert trava.situacao(str(tmp_path)) is not None      # sem TypeError
+    assert trava.adquirir(str(tmp_path), "bia", "PC-02") is not None
+
+
+def test_falha_na_escrita_nao_deixa_trava_vazia(tmp_path, monkeypatch):
+    def quebra(*a, **k):
+        raise RuntimeError("disco cheio")
+    monkeypatch.setattr(trava.json, "dump", quebra)
+    with pytest.raises(RuntimeError):
+        trava.adquirir(str(tmp_path), "ana", "PC-01", agora=T0)
+    assert not (tmp_path / trava.NOME_ARQUIVO).exists()

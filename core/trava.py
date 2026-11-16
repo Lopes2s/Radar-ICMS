@@ -6,6 +6,10 @@ como só uma ou duas pessoas importam, basta impedir que duas gravem ao mesmo
 tempo e mostrar a quem está com a vez. A trava VENCE sozinha (queda de rede ou de
 energia não pode travar ninguém para sempre) e só quem a criou a remove.
 
+Retomar uma trava vencida é serializado por um segundo arquivo, o mutex
+`NOME_RETOMADA`, criado com O_EXCL e segurado só por instantes; assim duas
+pessoas não removem e recriam a trava uma sobre a outra.
+
 Só biblioteca padrão. `pasta` é a pasta do banco."""
 import getpass
 import json
@@ -17,7 +21,9 @@ from datetime import datetime, timedelta, timezone
 from typing import NamedTuple
 
 NOME_ARQUIVO = "importando.lock"
+NOME_RETOMADA = "importando.lock.retomada"
 VALIDADE_PADRAO = timedelta(minutes=15)
+IDADE_MAX_RETOMADA = timedelta(seconds=30)
 
 
 class Importacao(NamedTuple):
@@ -47,6 +53,24 @@ def _caminho(pasta: str) -> str:
     return os.path.join(pasta, NOME_ARQUIVO)
 
 
+def _ocupado(agora: datetime) -> Importacao:
+    return Importacao("alguém", "outra máquina", agora, agora)
+
+
+def _remover(caminho: str) -> None:
+    try:
+        os.remove(caminho)
+    except OSError:
+        pass
+
+
+def _mtime(caminho: str) -> datetime | None:
+    try:
+        return datetime.fromtimestamp(os.path.getmtime(caminho), timezone.utc)
+    except OSError:
+        return None
+
+
 def quem_sou() -> tuple[str, str]:
     """(usuário do Windows, nome da máquina)."""
     try:
@@ -56,57 +80,99 @@ def quem_sou() -> tuple[str, str]:
     return usuario, socket.gethostname()
 
 
-def situacao(pasta: str, agora: datetime | None = None,
-             validade: timedelta = VALIDADE_PADRAO) -> Importacao | None:
-    """Quem está importando agora, ou None se ninguém (trava ausente ou vencida).
-
-    Arquivo ilegível (outra máquina ainda o escrevendo) vale como OCUPADO, com a
-    validade contada pela data do arquivo, para nunca virar "livre" por engano."""
-    agora = agora or _agora()
-    caminho = _caminho(pasta)
+def _ler(caminho: str, agora: datetime) -> Importacao | None:
+    """O que o arquivo diz, ou None se não existe. Arquivo ilegível ou com datas
+    incompatíveis (ex.: ISO sem fuso) vale como OCUPADO, com a data do arquivo."""
     try:
         with open(caminho, encoding="utf-8") as arquivo:
             dados = json.load(arquivo)
         atual = Importacao(dados["quem"], dados["maquina"],
                            datetime.fromisoformat(dados["desde"]),
                            datetime.fromisoformat(dados["renovado_em"]))
+        agora - atual.renovado_em  # levanta TypeError se os fusos não forem compatíveis
+        return atual
     except FileNotFoundError:
         return None
     except (OSError, ValueError, KeyError, TypeError):
-        try:
-            modificado = datetime.fromtimestamp(os.path.getmtime(caminho), timezone.utc)
-        except OSError:
+        modificado = _mtime(caminho)
+        if modificado is None:
             return None
-        atual = Importacao("alguém", "outra máquina", modificado, modificado)
+        return Importacao("alguém", "outra máquina", modificado, modificado)
+
+
+def situacao(pasta: str, agora: datetime | None = None,
+             validade: timedelta = VALIDADE_PADRAO) -> Importacao | None:
+    """Quem está importando agora, ou None se ninguém (trava ausente ou vencida)."""
+    agora = agora or _agora()
+    atual = _ler(_caminho(pasta), agora)
+    if atual is None:
+        return None
     return None if agora - atual.renovado_em > validade else atual
 
 
-def adquirir(pasta: str, quem: str, maquina: str, agora: datetime | None = None,
-             validade: timedelta = VALIDADE_PADRAO) -> Importacao | None:
-    """Tenta assumir a trava. Devolve None se conseguiu; senão, quem a tem.
-
-    A criação é atômica (O_EXCL): duas pessoas clicando juntas, só uma cria."""
-    agora = agora or _agora()
+def _criar(pasta: str, quem: str, maquina: str, agora: datetime) -> None:
+    """Cria a trava de forma atômica (O_EXCL) e escreve. FileExistsError se já existe.
+    Se a escrita falhar, o arquivo recém-criado é removido e o erro é relançado."""
     caminho = _caminho(pasta)
-    for _ in range(2):
-        try:
-            fd = os.open(caminho, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
-            atual = situacao(pasta, agora, validade)
-            if atual is not None:
-                return atual
-            try:                     # vencida: quem chegar primeiro a remove
-                os.remove(caminho)
-            except OSError:
-                pass
-            continue
+    fd = os.open(caminho, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    try:
         with os.fdopen(fd, "w", encoding="utf-8") as arquivo:
             json.dump({"quem": quem, "maquina": maquina,
                        "desde": agora.isoformat(),
                        "renovado_em": agora.isoformat()}, arquivo)
+    except BaseException:
+        _remover(caminho)
+        raise
+
+
+def _criar_mutex(caminho: str) -> None:
+    os.close(os.open(caminho, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+
+
+def _retomar(pasta: str, quem: str, maquina: str, agora: datetime,
+             validade: timedelta) -> Importacao | None:
+    """Assume uma trava vencida ou ilegível, uma pessoa de cada vez (mutex `NOME_RETOMADA`)."""
+    mutex = os.path.join(pasta, NOME_RETOMADA)
+    ocupado = lambda: situacao(pasta, agora, validade) or _ocupado(agora)  # noqa: E731
+    try:
+        _criar_mutex(mutex)
+    except FileExistsError:
+        modificado = _mtime(mutex)
+        # mutex antigo = quem o criou caiu no meio; remove e tenta uma vez
+        if modificado is None or _agora() - modificado <= IDADE_MAX_RETOMADA:
+            return ocupado()
+        _remover(mutex)
+        try:
+            _criar_mutex(mutex)
+        except FileExistsError:
+            return ocupado()
+    try:
+        atual = situacao(pasta, agora, validade)   # reler: alguém pode ter retomado antes
+        if atual is not None:
+            return atual
+        _remover(_caminho(pasta))
+        try:
+            _criar(pasta, quem, maquina, agora)
+        except FileExistsError:
+            return ocupado()
         return None
-    return situacao(pasta, agora, validade) or Importacao(
-        "alguém", "outra máquina", agora, agora)
+    finally:
+        _remover(mutex)
+
+
+def adquirir(pasta: str, quem: str, maquina: str, agora: datetime | None = None,
+             validade: timedelta = VALIDADE_PADRAO) -> Importacao | None:
+    """Tenta assumir a trava. Devolve None se conseguiu; senão, quem a tem."""
+    agora = agora or _agora()
+    try:
+        _criar(pasta, quem, maquina, agora)
+        return None
+    except FileExistsError:
+        pass
+    atual = situacao(pasta, agora, validade)
+    if atual is not None:
+        return atual
+    return _retomar(pasta, quem, maquina, agora, validade)
 
 
 def liberar(pasta: str, quem: str, maquina: str) -> bool:
