@@ -275,3 +275,87 @@ def test_regime_sem_cad_icms_mantem_empresa_limpa_e_cad_icms_vazio():
     r = regimes.parse(texto)[0][0]
     assert r["EMPRESA"] == "ACME LTDA"
     assert r["CAD/ICMS"] == ""
+
+
+# Layout "Delegacia Regional" (Regime Especial de Recolhimento do ICMS, nº
+# 1.456 de 2026, Cooperativa Agroindustrial Alfa, DOE nº 12.212): o título é
+# "REGIME ESPECIAL DE RECOLHIMENTO DO ICMS Nº1.456" (sem "/ano"), o cabeçalho
+# usa CONTRIBUINTE/Súmula em vez de BENEFICIÁRIA/EMENTA e não há seções
+# numeradas com título. A página do Diário traz outras matérias antes e depois.
+_ALFA_REAL = (
+    "28 4ª FEIRA |09/SET/2026 - EDIÇÃO N° 12.212\n"
+    "Protocolo 120923/2026\n"
+    "Receita Estadual do Paraná\n"
+    "<#E.G.B#120349/2026#28#2113543>\n"
+    "ESTADO DO PARANÁ SECRETARIA DE ESTADO DA\n"
+    "FAZENDA\n"
+    "RECEITA ESTADUAL DO PARANÁ\n"
+    "14ª DELEGACIA REGIONAL DA RECEITA - DRR REGIME ESPECIAL\n"
+    "DE RECOLHIMENTO DO ICMS Nº1.456\n"
+    "PROTOCOLO Nº 261332744 CONTRIBUINTE:COOPERATIVA\n"
+    "AGROINDUSTRIAL ALFA CAD/ICMS:91154823-24\n"
+    "CNPJ:83.305.235/0227-83\n"
+    "ENDEREÇO:ROD PRT 280 KM 224 42, SN - BL 1; - INTERIOR\n"
+    "MUNICIPIO:VITORINO\n"
+    "Súmula - Concede apuração e recolhimento do ICMS na forma do inciso XIX do\n"
+    "art. 74 do RICMS/2017.\n"
+    "O Delegado Regional da Receita, após examinar o pedido constante no\n"
+    "29 4ª FEIRA |09/SET/2026 - EDIÇÃO N° 12.212\n"
+    "protocolo acima e considerando atendidos os requisitos, resolve CONCEDER\n"
+    "REGIME ESPECIAL DE\n"
+    "RECOLHIMENTO DO ICMS ao contribuinte acima identificado. Este Regime\n"
+    "Especial autoriza os seguintes procedimentos:\n"
+    "1. Dispensa o contribuinte de recolher o valor do ICMS devido por\n"
+    "ocasião do fato gerador e lhe autoriza a apurar e recolher esse valor.\n"
+    "2. A nota fiscal que documentar a operação deverá conter a seguinte\n"
+    "observação:\n"
+    "“REGIME ESPECIAL DE RECOLHIMENTO DO ICMS Nº 1.456” .\n"
+    "6. Este Regime Especial entrará em vigor na data de sua publicação no\n"
+    "Diário Oficial - Comércio Indústria e Serviços.\n"
+    "Pato Branco/PR, 11 de Agosto de 2026 José Antonio Sarturi\n"
+    "Delegado Regional da Receita\n"
+    "<#E.G.B#120349/2026#29#2113543/>\n"
+    "Protocolo 120349/2026\n"
+    "Autarquias\n"
+    "ADAPAR\n"
+    "Outra matéria sem relação, cuja eficácia se encerra em 31/12/2030.\n"
+)
+
+
+def test_alfa_delegacia_vira_um_registro_com_os_campos_do_cabecalho():
+    registros, descartes = regimes.parse(_ALFA_REAL)
+    assert descartes == []
+    assert len(registros) == 1          # a citação entre aspas não é 2º título
+    r = registros[0]
+    assert r["Nº DO REGIME ESPECIAL"] == "1.456/2026"
+    assert r["ANO"] == "2026"
+    assert r["DATA"] == "2026-09-09"
+    assert r["Nº DOE"] == "12.212"
+    assert r["EMPRESA"] == "COOPERATIVA AGROINDUSTRIAL ALFA"
+    assert r["CNPJ REQUERENTE"] == "83.305.235/0227-83"
+    assert r["CAD/ICMS"] == "91154823-24"
+    assert r["EMENTA"] == ("Concede apuração e recolhimento do ICMS na forma do "
+                           "inciso XIX do art. 74 do RICMS/2017.")
+
+
+def test_alfa_procedimentos_vao_ate_a_assinatura_sem_ruido():
+    r = regimes.parse(_ALFA_REAL)[0][0]
+    proc = r["BENEFÍCIOS/PROCEDIMENTOS"]
+    assert proc.startswith("1. Dispensa o contribuinte")
+    assert "6. Este Regime Especial entrará em vigor" in proc
+    assert "Pato Branco" not in proc and "Sarturi" not in proc
+    assert "FEIRA" not in proc
+
+
+def test_alfa_nao_herda_vigencia_de_materia_vizinha_da_mesma_pagina():
+    # o regime não declara vigência; "eficácia se encerra em 31/12/2030" é de
+    # OUTRA matéria do mesmo Diário e não pode vazar para este registro
+    r = regimes.parse(_ALFA_REAL)[0][0]
+    assert r["VIGÊNCIA DO RE"] == ""
+    assert r["ABRANGÊNCIA"] == "" and r["DISPOSIÇÕES GERAIS"] == ""
+
+
+def test_regime_de_recolhimento_convive_com_regime_da_fiscalizacao_no_mesmo_texto():
+    registros, descartes = regimes.parse(_JAGUAFRANGOS_REAL + "\n" + _ALFA_REAL)
+    assert descartes == []
+    assert [x["Nº DO REGIME ESPECIAL"] for x in registros] == ["8.715/2025", "1.456/2026"]
