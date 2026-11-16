@@ -358,6 +358,43 @@ def test_rodape_com_numero_de_pagina_de_dois_digitos_nao_vaza():
     assert "continua na página seguinte a sem qualquer ruído" in problema
 
 
+def test_rodape_com_numero_de_pagina_de_tres_digitos_nao_vaza():
+    # documentos de 100+ páginas (o de 2023 tem 226) têm rodapé de 3 dígitos
+    texto = (
+        "ANO: 2026\n"
+        "PROTOCOLOS: 25.152.191-3\n"
+        "CONSULTA Nº 001, de 19 de janeiro de 2026.\n"
+        "SÚMULA: ICMS. X.\n"
+        "A consulente informa que o texto continua na página seguinte a\n"
+        "__________________________________________________\n"
+        "120\n"
+        + _CABECALHO_PAGINA
+        + "sem qualquer ruído no meio da frase.\n"
+        "RESPOSTA\n"
+        "Resposta.\n"
+    )
+    problema = consultas.parse(texto)[0]["Problema da Consulta"]
+    assert "continua na página seguinte a sem qualquer ruído" in problema
+    assert "120" not in problema
+
+
+def test_ano_de_quatro_digitos_apos_o_rodape_continua_no_texto():
+    # a trava do (?!\d): "2023" abre o parágrafo seguinte e não é rodapé
+    texto = (
+        "ANO: 2026\n"
+        "PROTOCOLOS: 25.152.191-3\n"
+        "CONSULTA Nº 001, de 19 de janeiro de 2026.\n"
+        "SÚMULA: ICMS. X.\n"
+        "A consulente informa que\n"
+        "__________________________________________________\n"
+        "2023 foi o ano em que ocorreu o fato.\n"
+        "RESPOSTA\n"
+        "Resposta.\n"
+    )
+    problema = consultas.parse(texto)[0]["Problema da Consulta"]
+    assert "2023 foi o ano" in problema
+
+
 def test_cabecalho_nao_come_numero_de_paragrafo_da_linha_seguinte():
     texto = (
         "ANO: 2026\n"

@@ -18,14 +18,14 @@ from core.pdf_text import MARCA_CITACAO, MARCA_PARAGRAFO
 # parágrafos: sem isso, uma menção à Secretaria no corpo do texto casava até
 # o cabeçalho da página seguinte e apagava tudo no meio.
 #
-# O rodapé só é reconhecido com 1 ou 2 dígitos e não seguido de outro dígito
-# (`\d{1,2}(?!\d)`): isso o distingue de um número que abre legitimamente o
+# O rodapé só é reconhecido com 1 a 3 dígitos (documentos de 100+ páginas) e
+# não seguido de outro dígito (`\d{1,3}(?!\d)`): isso o distingue de um número que abre legitimamente o
 # parágrafo seguinte, como um ano ("2023 foi o ano..." tem 4 dígitos e não
 # casa). Sem cabeçalho depois (rodapé da última página do documento), o
 # rodapé ainda é removido sozinho — necessário para o campo RESPOSTA, que
 # pode se estender até o fim do texto.
 _CABECALHO = re.compile(
-    r'_+\s*\d{1,2}(?!\d)\s*(?:SECRETARIA DE ESTADO DA FAZENDA DO PARAN[ÁA][^\n]*'
+    r'_+\s*\d{1,3}(?!\d)\s*(?:SECRETARIA DE ESTADO DA FAZENDA DO PARAN[ÁA][^\n]*'
     r'\n\s*SETOR CONSULTIVO(?:\s*_+)*)?'
     r'|SECRETARIA DE ESTADO DA FAZENDA DO PARAN[ÁA][^\n]*\n\s*SETOR CONSULTIVO(?:\s*_+)*',
     re.IGNORECASE,
