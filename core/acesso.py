@@ -1,33 +1,21 @@
 # core/acesso.py
 """Perfis de uso da interface e a senha do Administrador.
 
-Sem dependência de streamlit: quem chama passa o `st.secrets` (ou um dict).
-A senha fica em .streamlit/secrets.toml, seção [admin], chave `senha`. É
-texto puro no disco: protege contra uso acidental da interface, não contra
-quem tem acesso ao arquivo.
+A senha do Administrador e FIXA, definida aqui em SENHA_ADMIN: todo usuario recebe a
+mesma senha com o programa, sem criar arquivo. Esta no codigo (e no pacote da rede):
+protege contra uso acidental da interface, nao contra quem tem acesso ao codigo.
 """
 import hmac
 
 PERFIL_CONSULTA = "consulta"
 PERFIL_ADMIN = "admin"
 
+SENHA_ADMIN = "M@rtinelli"
 
-def senha_admin(secrets) -> str | None:
-    """Senha configurada do Administrador, ou None se não houver uma válida.
 
-    Falha fechada: qualquer problema ao ler (arquivo inexistente, seção
-    ausente, valor vazio ou que não seja texto) vira None, e None desabilita
-    o perfil Administrador — nunca vira acesso aberto. O `except Exception`
-    é proposital pelo mesmo motivo: o st.secrets levanta tipos de erro
-    diferentes conforme a versão e o estado do arquivo.
-    """
-    try:
-        valor = secrets["admin"]["senha"]
-    except Exception:  # noqa: BLE001
-        return None
-    if not isinstance(valor, str) or not valor.strip():
-        return None
-    return valor
+def senha_admin() -> str:
+    """Senha do Administrador (fixa)."""
+    return SENHA_ADMIN
 
 
 def confere(digitada: str | None, esperada: str | None) -> bool:

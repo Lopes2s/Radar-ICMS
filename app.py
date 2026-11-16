@@ -586,8 +586,7 @@ def _login_escolha(senha_configurada: bool):
         st.rerun()
     design.nota_de_opcao("Importar PDFs e gerenciar o banco. Exige senha.")
     if not senha_configurada:
-        st.warning("Senha do administrador não configurada. Crie "
-                   ".streamlit/secrets.toml com a seção [admin] e a chave senha (veja o README).")
+        st.warning("Senha do administrador não configurada (veja core/acesso.py).")
 
 
 def _login_senha(esperada: str):
@@ -612,8 +611,8 @@ def _login_senha(esperada: str):
 
 def _tela_login():
     """Login centralizado na tela, em duas etapas: escolha do perfil e, para o
-    Administrador, a senha de .streamlit/secrets.toml."""
-    esperada = acesso.senha_admin(st.secrets)
+    Administrador, a senha fixa de core/acesso.py."""
+    esperada = acesso.senha_admin()
     with st.container(border=True, key="card-login"):
         if st.session_state.get("login_etapa") == "senha" and esperada is not None:
             _login_senha(esperada)

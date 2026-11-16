@@ -86,21 +86,14 @@ atualizar a página (F5) também, pois o perfil vive só na sessão.
 | **Administrador** | exige senha | Processar e mapear + Consultar |
 
 ### Perfis e senha do Administrador
-A senha fica em `.streamlit/secrets.toml`, que não é versionado e precisa ser
-criado em cada máquina onde a ferramenta for usada:
-
-```toml
-[admin]
-senha = "troque-esta-senha"
-```
-
-Sem o arquivo (ou com a seção/chave ausente, vazia ou que não seja texto), o
-perfil Administrador fica **desabilitado** — nunca cai em acesso aberto; o
-perfil Consulta continua funcionando. A lógica está em `core/acesso.py`.
+A senha do Administrador é **fixa**, definida em `core/acesso.py` (`SENHA_ADMIN`); todo
+usuário a recebe junto com o programa, sem criar nenhum arquivo. Para trocá-la, edite essa
+constante, commite e publique de novo (`scripts/montar_rede.ps1`). O perfil Consulta não pede senha.
+A lógica está em `core/acesso.py`.
 
 Limites conhecidos:
-- a senha é texto puro no disco: protege contra uso acidental da interface, não
-  contra quem tem acesso ao arquivo;
+- a senha está no código (e no pacote da rede): protege contra uso acidental da
+  interface, não contra quem tem acesso ao código;
 - a CLI (`processar.py`) não tem restrição de perfil;
 - não há bloqueio por tentativas erradas de senha.
 
@@ -363,14 +356,8 @@ navegador desligam o servidor local. Um segundo clique no atalho reabre o que j�
   Para restaurar, feche a ferramenta em todas as máquinas e substitua `mapeamento.db` por uma cópia.
 - **Perfil Consulta:** abre o banco somente leitura. Se o banco ainda não existe ou foi
   atualizado por uma versão nova, a tela pede ao Administrador abrir a ferramenta primeiro.
-- **Senha do Administrador (fixa):** o `montar_rede.ps1` inclui no pacote o `.streamlit\secrets.toml` do
-  repositório (seção `[admin]`, chave `senha`); todo usuário recebe a mesma senha na cópia local,
-  sem criar arquivo. Para trocar a senha, edite esse arquivo, rode o script de novo e cada pessoa
-  recebe a nova na próxima abertura. Atenção: quem puder ler a pasta de rede consegue ler a senha
-  (está dentro do zip). Se preferir não distribuí-la, apague o `secrets.toml` do repositório antes
-  de montar e crie `%USERPROFILE%\.streamlit\secrets.toml` só nos computadores dos administradores.
-  Crie `%USERPROFILE%\.streamlit\secrets.toml` no computador do Administrador, com a seção
-  `[admin]` e a chave `senha`; o Streamlit lê esse arquivo também.
+- **Senha do Administrador:** fixa no código (`core/acesso.py`), igual para todos; ninguém cria
+  `secrets.toml`. Quem puder ler a pasta de rede consegue ler a senha.
 - **Atualizar a ferramenta:** commite a mudança e rode `montar_rede.ps1` de novo, a qualquer hora
   (ninguém executa arquivos da rede). Na próxima abertura de cada pessoa o `.vbs` vê que a versão
   mudou e atualiza a cópia local sozinho. Quem estiver com a ferramenta aberta continua na versão
@@ -387,10 +374,8 @@ git archive --format=zip -o mapeador_pr.zip HEAD
 ```
 
 Na máquina de destino, `Mapeador.bat` cria o `.venv` na primeira execução (precisa
-de internet nessa vez). O `.streamlit/secrets.toml` e o `mapeamento.db` precisam
-ser criados/copiados à parte (não são versionados).
-
-Observação: guardar o `secrets.toml` dentro do projeto vale só para esta instalação de uma máquina, não para a pasta de rede.
+de internet nessa vez). O `mapeamento.db` precisa ser copiado à parte (não é versionado).
+A senha do Administrador já vem no programa.
 
 ## 11. Limitações conhecidas
 - Os padrões de vigência dos regimes cobrem os casos vistos; podem existir

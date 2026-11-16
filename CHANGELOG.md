@@ -4,7 +4,7 @@
 - **Cópia local automática**: rodar o Python pela pasta de rede levava minutos para abrir. Agora `montar_rede.ps1` monta o programa numa pasta local, empacota num `.zip` versionado (`programa\`) e o `Radar ICMS.vbs` copia/atualiza o programa em `%LOCALAPPDATA%\RadarICMS` na primeira abertura e a cada versão nova. Só o banco, a trava e os backups continuam na rede.
 - `montar_rede.ps1` não recusa mais atualizar com a ferramenta em uso (`-Forcar` removido) e pode rodar a qualquer hora.
 - Nome visível da ferramenta: **Radar ICMS** (atalho `Radar ICMS.vbs`).
-- **Senha fixa do Administrador**: `montar_rede.ps1` inclui o `.streamlit\secrets.toml` do repositório no pacote; ninguém precisa criar o arquivo.
+- **Senha fixa do Administrador**: definida no código (`core/acesso.py`), igual para todos; não é mais preciso criar `secrets.toml`.
 
 ## 0.10.0
 - **Compartilhamento pela rede**: código, Python portátil e banco ficam numa pasta de rede; cada pessoa abre por `Radar ICMS.vbs` (sem janela de console, sem instalar nada) e vê o mesmo banco. `scripts/montar_rede.ps1` monta e atualiza a pasta.

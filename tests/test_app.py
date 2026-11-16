@@ -282,7 +282,7 @@ def _tela_inicial(monkeypatch, senha=None):
     """Tela inicial com a senha de admin controlada pelo teste. Substitui
     acesso.senha_admin (o app a chama pelo módulo), de modo que um
     .streamlit/secrets.toml real da máquina nunca influencia o resultado."""
-    monkeypatch.setattr(acesso, "senha_admin", lambda _secrets: senha)
+    monkeypatch.setattr(acesso, "senha_admin", lambda *_args: senha)
     return AppTest.from_file(APP).run(timeout=30)
 
 

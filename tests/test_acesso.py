@@ -3,23 +3,9 @@ import pytest
 from core import acesso
 
 
-def test_senha_admin_le_do_mapeamento():
-    assert acesso.senha_admin({"admin": {"senha": "segredo"}}) == "segredo"
-
-
-@pytest.mark.parametrize("secrets", [
-    {}, {"admin": {}}, {"admin": {"senha": ""}}, {"admin": {"senha": "   "}},
-    {"admin": {"senha": 1234}}, {"admin": "texto"}, {"admin": None}, None,
-])
-def test_senha_ausente_vazia_ou_nao_texto_e_none(secrets):
-    assert acesso.senha_admin(secrets) is None
-
-
-def test_erro_ao_ler_secrets_e_none_nunca_acesso_aberto():
-    class SemArquivo:
-        def __getitem__(self, chave):
-            raise FileNotFoundError("No secrets found")
-    assert acesso.senha_admin(SemArquivo()) is None
+def test_senha_admin_e_fixa_e_nao_depende_de_secrets_toml():
+    assert acesso.senha_admin() == "M@rtinelli"
+    assert acesso.senha_admin() == acesso.SENHA_ADMIN
 
 
 def test_confere_senha_correta_e_errada():
