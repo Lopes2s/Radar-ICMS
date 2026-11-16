@@ -4,7 +4,7 @@ Ferramenta local que lê PDFs da SEFA-PR (consultas tributárias) e do Diário
 Oficial (regimes especiais), extrai os campos objetivos, mapeia tudo num banco
 SQLite e permite consultar o que foi mapeado por uma interface web (Streamlit).
 
-Versão atual: **0.9.0** (histórico em [`CHANGELOG.md`](CHANGELOG.md)).
+Versão atual: **0.10.0** (histórico em [`CHANGELOG.md`](CHANGELOG.md)).
 
 ## Sumário
 1. [O que a ferramenta faz](#1-o-que-a-ferramenta-faz)
@@ -274,10 +274,15 @@ o mesmo caminho — `Execucao` → `pipeline` → `armazenamento`.
 | `core/log.py` | log em arquivo |
 | `core/versao.py` | versão do app (`VERSAO_APP`) |
 | `core/bootstrap.py` | verificação e instalação das dependências |
+| `core/trava.py` | trava de importação em arquivo (quem grava, desde quando, validade de 15 min) |
+| `core/backup.py` | backup consistente do banco antes de cada gravação |
+| `core/ocioso.py` | desligamento do servidor local sem navegador conectado |
 | `app.py` | interface Streamlit |
 | `processar.py` | linha de comando |
 | `iniciar.py` | abre a interface preparando o ambiente antes |
 | `Mapeador.bat` | atalho de duplo clique para `iniciar.py` |
+| `scripts/Mapeador.vbs` | atalho de rede, sem janela de console |
+| `scripts/montar_rede.ps1` | monta e atualiza a pasta de rede (Python portátil + dependências) |
 | `interface/design.py` | Design System Martinelli: tokens claro/escuro, CSS dos componentes e blocos de HTML (marca, cabeçalho, estado vazio) |
 | `interface/icones.py` | ícones do showcase usados nos indicadores e cartões |
 | `.streamlit/config.toml` | tema nativo do Streamlit (claro e escuro), fonte Urbanist e barra de ferramentas |
@@ -318,12 +323,51 @@ pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-A suíte tem 421 testes e leva cerca de um minuto. Os testes usam uma pasta de
+A suíte tem 492 testes e leva cerca de um minuto. Os testes usam uma pasta de
 dados temporária (`tests/conftest.py`), nunca o banco real do projeto.
 
 ## 10. Distribuição
-Hoje a entrega é pelo git — só os arquivos versionados, sem a pasta `.git` (que
-contém dados do autor) nem caches:
+### Pela rede (recomendado)
+Uma pasta de rede acessível a todos guarda tudo; cada pessoa roda o servidor na
+própria máquina (`127.0.0.1`) e lê/grava o mesmo banco.
+
+```
+\\rede\Mapeador\
+  Mapeador.vbs      duplo clique, sem janela de console
+  app\              código + python\ (Python portátil com as dependências)
+  dados\            mapeamento.db e backups\
+```
+
+**Montar ou atualizar** (por quem mantém a ferramenta, com internet, na raiz do repositório):
+
+```powershell
+.\scripts\montar_rede.ps1 -Destino \\servidor\pasta\Mapeador
+```
+
+Cada usuário cria um atalho para `Mapeador.vbs` na área de trabalho. A janela do
+navegador abre sozinha; **Encerrar ferramenta** (barra lateral) ou 10 minutos sem
+navegador desligam o servidor local. Um segundo clique no atalho reabre o que já está aberto.
+
+- **Quem grava:** só o Administrador. Uma **trava de importação** (`dados\importando.lock`)
+  impede duas gravações ao mesmo tempo e mostra quem está gravando; ela vence em 15 min
+  se a máquina cair. Antes de cada importação (**Gravar**) é feito um **backup** (`dados\backups\`, 10 mais recentes);
+  as edições manuais não geram backup, mas ficam no histórico de cada ato (origem `manual`).
+  A linha de comando `processar.py` grava **sem** a trava de importação: não aponte para o banco
+  da rede enquanto outras pessoas usam a ferramenta.
+  Para restaurar, feche a ferramenta em todas as máquinas e substitua `mapeamento.db` por uma cópia.
+- **Perfil Consulta:** abre o banco somente leitura. Se o banco ainda não existe ou foi
+  atualizado por uma versão nova, a tela pede ao Administrador abrir a ferramenta primeiro.
+- **Senha do Administrador:** não deixe `secrets.toml` em `app\.streamlit\` (todos leriam).
+  Crie `%USERPROFILE%\.streamlit\secrets.toml` no computador do Administrador, com a seção
+  `[admin]` e a chave `senha`; o Streamlit lê esse arquivo também.
+- **Atualizar a ferramenta:** peça a todos para clicarem em **Encerrar ferramenta** e rode o script;
+  ele recusa atualizar se detectar a ferramenta em uso (o Windows trava o Python portátil
+  enquanto alguém o usa). `-Forcar` ignora a checagem.
+- **Logs:** ficam em `%LOCALAPPDATA%\MapeadorPR\logs` de cada usuário.
+- **Duas pessoas importando ao mesmo tempo não é suportado**: a trava só impede, não enfileira.
+
+### Por arquivo zip (uma cópia por máquina)
+Entrega só os arquivos versionados, sem a pasta `.git` nem caches:
 
 ```bash
 git archive --format=zip -o mapeador_pr.zip HEAD
@@ -333,19 +377,20 @@ Na máquina de destino, `Mapeador.bat` cria o `.venv` na primeira execução (pr
 de internet nessa vez). O `.streamlit/secrets.toml` e o `mapeamento.db` precisam
 ser criados/copiados à parte (não são versionados).
 
+Observação: guardar o `secrets.toml` dentro do projeto vale só para esta instalação de uma máquina, não para a pasta de rede.
+
 ## 11. Limitações conhecidas
 - Os padrões de vigência dos regimes cobrem os casos vistos; podem existir
   outros no histórico do Diário Oficial.
 - Layouts de PDF muito diferentes dos fixtures podem exigir ajuste dos limiares
   de `_marca_paragrafos_da_pagina` (`core/pdf_text.py`); se a detecção falhar, a
   Resposta cai no texto achatado de sempre.
-- O banco é local (SQLite, um usuário por vez); a senha do Administrador é texto
+- O banco fica numa pasta de rede (SQLite sobre SMB), com um gravador por vez: isso só é
+  seguro por causa da trava de importação; gravações simultâneas não são suportadas. A senha do Administrador é texto
   puro no disco (ver [Perfis e senha](#perfis-e-senha-do-administrador)).
 - A consulta de CNPJ depende de internet e de um serviço público de terceiros
   (BrasilAPI), sem garantia de disponibilidade; sem ela, o CNAE da Receita fica
   "não consultado" até uma nova consulta.
 
 ## 12. Desenvolvimento futuro
-O único item planejado é a **criação de um executável em binário** da
-ferramenta, a ser feita depois de concluídas as otimizações. Até lá, a
-distribuição segue como descrito na [seção 10](#10-distribuição).
+O único item planejado é a **criação de um executável em binário** da ferramenta, se a distribuição pela rede deixar de bastar.

@@ -1,5 +1,15 @@
 # Histórico de versões
 
+## 0.10.0
+- **Compartilhamento pela rede**: código, Python portátil e banco ficam numa pasta de rede; cada pessoa abre por `Mapeador.vbs` (sem janela de console, sem instalar nada) e vê o mesmo banco. `scripts/montar_rede.ps1` monta e atualiza a pasta.
+- O perfil **Consulta** abre o banco **somente leitura** (nunca cria nem migra o arquivo); se o banco não existe ou é de versão antiga, a tela pede ao Administrador abrir a ferramenta.
+- **Gravar** passa a usar uma **trava de importação** (`importando.lock`, vence em 15 min): quem tenta gravar enquanto outra pessoa grava vê o nome e o horário. Antes de cada gravação é feito um **backup** em `backups/` (10 mais recentes). Conexões esperam até 30 s por bloqueio.
+- Botão **Encerrar ferramenta** e desligamento automático do servidor local após 10 min sem navegador (só no atalho).
+- Gravar (importação ou edição manual) **espera até 60 s** a vez quando outra pessoa está gravando (`MAPEADOR_ESPERA_TRAVA_S`). `montar_rede.ps1` recusa atualizar com a ferramenta em uso.
+- Um segundo clique no atalho reabre o servidor já aberto; falhas de inicialização sem console aparecem numa caixa de mensagem. O log do atalho fica na máquina de cada usuário (`MAPEADOR_LOGS`).
+- Robustez: pasta de rede fora do ar vira mensagem (não mais erro técnico), inclusive nas edições do detalhe; a trava tenta de novo ao ser removida quando o Windows a mantém aberta; clique duplo durante a partida espera o servidor em vez de subir outro. O backup cobre a importação (Gravar); edições manuais ficam no histórico por ato; `processar.py` grava sem a trava. Atalho com `python -B` (sem `.pyc` na pasta de rede).
+- Schema do banco inalterado (4).
+
 ## 0.9.1
 - **Correção no parser de regimes**: rótulos com espaço antes dos dois-pontos (ex.: `CAD/ICMS :61700643-03`, presente no Regime Especial nº 8.715/2025) não corrompem mais a EMPRESA nem deixam o CAD/ICMS vazio. Vale também para `CNPJ :`, `BENEFICIÁRIA :` e `EMENTA :`.
 - **Correção no parser de consultas**: o rodapé de página com número de 3 dígitos (documentos de 100+ páginas) deixa de sobrar dentro dos campos.

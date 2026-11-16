@@ -1,9 +1,13 @@
 # app.py
 import html
 import io
+import logging
 import os
 import re
+import sqlite3
 import tempfile
+import threading
+import time
 from datetime import datetime
 
 from core.bootstrap import DEPS_APP, garantir_dependencias
@@ -14,13 +18,45 @@ garantir_dependencias(DEPS_APP)
 
 import streamlit as st  # noqa: E402
 
-from core import (acesso, armazenamento, cnpj, consulta, diagnostico, edicao,  # noqa: E402
-                  log, planilha)
+from core import (acesso, armazenamento, backup, cnpj, consulta, diagnostico,  # noqa: E402
+                  edicao, log, ocioso, planilha, trava)
 from core.execucao import Execucao  # noqa: E402
 from core.pdf_text import MARCA_CITACAO  # noqa: E402
 from interface import design, formularios  # noqa: E402
 
-log.configurar_log(armazenamento.pasta_dados())
+try:
+    log.configurar_log(armazenamento.pasta_dados())
+except OSError:      # pasta de rede fora do ar: a tela de erro abaixo ainda precisa aparecer
+    pass
+
+# Modo atalho: aberto por Mapeador.vbs (MAPEADOR_MODO_ATALHO=1). Liga o botão
+# Encerrar e o desligamento por ociosidade; fora dele (streamlit run, testes) nada disso existe.
+_MODO_ATALHO = os.environ.get("MAPEADOR_MODO_ATALHO") == "1"
+
+
+def _encerrar_servidor():
+    """Desliga o servidor um instante depois, para a página mostrar o aviso antes."""
+    threading.Timer(1.0, os._exit, args=(0,)).start()
+
+
+@st.cache_resource
+def _vigiar_ociosidade():
+    vigia = ocioso.VigiaOciosidade(ocioso.contar_sessoes_streamlit)
+
+    def laco():
+        while True:
+            time.sleep(30)
+            if vigia.deve_encerrar():
+                logging.getLogger(log.NOME).info(
+                    "Sem navegador conectado: encerrando o servidor.")
+                os._exit(0)
+
+    threading.Thread(target=laco, daemon=True).start()
+    return True
+
+
+if _MODO_ATALHO:
+    _vigiar_ociosidade()
 
 _FORCAR = {"Detectar automaticamente": None,
            "Forçar Consulta": "consulta",
@@ -35,6 +71,38 @@ _PERFIS = {acesso.PERFIL_ADMIN: "Administrador",
 # variável, cai no padrão de armazenamento.conectar() (mapeamento.db na raiz
 # do projeto).
 _CAMINHO_BANCO = os.environ.get("MAPEADOR_BANCO") or None
+
+
+def _pasta_do_banco() -> str:
+    """Pasta onde moram o banco, a trava de importação e os backups."""
+    return os.path.dirname(os.path.abspath(
+        armazenamento.caminho_do_banco(_CAMINHO_BANCO)))
+
+
+def _espera_da_trava() -> float:
+    """Quantos segundos uma gravação espera a vez quando outra pessoa está gravando."""
+    try:
+        return float(os.environ.get("MAPEADOR_ESPERA_TRAVA_S", "60"))
+    except ValueError:
+        return 60.0
+
+
+def _escrevendo():
+    """Segura a trava de gravação durante uma escrita (importação ou edição manual).
+    `trava.ImportacaoEmAndamento` se, passada a espera, outra pessoa ainda estiver gravando."""
+    return trava.importando(_pasta_do_banco(), esperar_s=_espera_da_trava())
+
+
+_MSG_BANCO_INACESSIVEL = ("Não foi possível abrir o banco na pasta de rede. Confira se a "
+                          "pasta está acessível e recarregue a página.")
+
+
+def _sessao_do_perfil(perfil_atual):
+    """Administrador abre (e, se preciso, migra) o banco; Consulta só lê."""
+    if perfil_atual == acesso.PERFIL_ADMIN:
+        return armazenamento.sessao(_CAMINHO_BANCO)
+    return armazenamento.sessao_leitura(_CAMINHO_BANCO)
+
 
 # Visual: Design System Martinelli (interface/design.py + .streamlit/config.toml).
 st.set_page_config(page_title="Mapeador Tributário PR", page_icon="⚖️",
@@ -150,10 +218,16 @@ def _salvar_edicao(tipo: str, registro: dict, colunas: list, prefixo: str):
     novos = {c: st.session_state.get(f"{prefixo}|{c}", "") for c in colunas}
     chave_atual = {c: registro[c] for c in edicao.TIPOS[tipo][2]}
     try:
-        with armazenamento.sessao(_CAMINHO_BANCO) as conn:
+        with _escrevendo(), armazenamento.sessao(_CAMINHO_BANCO) as conn:
             r = edicao.editar_registro(conn, tipo, chave_atual, novos)
     except (edicao.ChaveEmConflito, edicao.ChaveVazia, edicao.RegistroInexistente) as erro:
         st.session_state["erro_edicao"] = str(erro)
+        return
+    except trava.ImportacaoEmAndamento as erro:
+        st.session_state["erro_edicao"] = str(erro)
+        return
+    except (OSError, sqlite3.Error) as erro:
+        st.session_state["erro_edicao"] = f"Não foi possível gravar no banco ({erro}). Confira a pasta de rede e tente de novo."
         return
     st.session_state.pop("erro_edicao", None)
     _avisar(r, "Ato atualizado")
@@ -172,8 +246,17 @@ def _consultar_cnpj(cnpj_do_regime: str):
     on_click do botão: fecha o detalhe (como a edição e o aplicar CNAE), o toast sai na
     reexecução seguinte e os dados novos aparecem ao reabrir a linha."""
     acesso.exige_admin(st.session_state.get("perfil"))
-    with armazenamento.sessao(_CAMINHO_BANCO) as conn:
-        resumo = cnpj.atualizar(conn, [cnpj_do_regime], forcar=True)
+    try:
+        with _escrevendo(), armazenamento.sessao(_CAMINHO_BANCO) as conn:
+            resumo = cnpj.atualizar(conn, [cnpj_do_regime], forcar=True)
+    except trava.ImportacaoEmAndamento as erro:
+        st.session_state["aviso"] = str(erro)
+        _fecha_selecao_da_tabela()
+        return
+    except (OSError, sqlite3.Error) as erro:
+        st.session_state["aviso"] = f"Não foi possível gravar no banco ({erro}). Confira a pasta de rede e tente de novo."
+        _fecha_selecao_da_tabela()
+        return
     if resumo["consultados"]:
         st.session_state["aviso"] = "Receita Federal: CNPJ consultado."
     elif resumo["falhas"]:
@@ -190,10 +273,16 @@ def _aplicar_cnae(registro: dict, receita: dict):
     novos = {"CNAE REQUERENTE": cnpj.formatar_cnae(receita["cnae_codigo"]),
              "DESCRIÇÃO CNAE": receita["cnae_descricao"]}
     try:
-        with armazenamento.sessao(_CAMINHO_BANCO) as conn:
+        with _escrevendo(), armazenamento.sessao(_CAMINHO_BANCO) as conn:
             r = edicao.editar_registro(conn, "regime", chave_atual, novos)
     except edicao.RegistroInexistente as erro:
         st.session_state["aviso"] = str(erro)
+        return
+    except trava.ImportacaoEmAndamento as erro:
+        st.session_state["aviso"] = str(erro)
+        return
+    except (OSError, sqlite3.Error) as erro:
+        st.session_state["aviso"] = f"Não foi possível gravar no banco ({erro}). Confira a pasta de rede e tente de novo."
         return
     _avisar(r, "CNAE aplicado")
     _fecha_selecao_da_tabela()
@@ -327,11 +416,17 @@ def _gravar(analise, sobrescrever=()):
     (mesmas chaves de sempre)."""
     acesso.exige_admin(st.session_state.get("perfil"))
     lote = analise["lote"]
-    mapeamento = _persistir(lote, sobrescrever)
-    if cnpj.habilitada():
-        with st.spinner("Consultando os CNPJs na Receita Federal…"):
-            with armazenamento.sessao(_CAMINHO_BANCO) as conn:
-                _avisar_receita(cnpj.atualizar_do_lote(conn, lote))
+    pasta = _pasta_do_banco()
+    # a trava segura só uma gravação por vez (esperando a vez, se preciso); o backup
+    # vem ANTES de qualquer escrita
+    with _escrevendo():
+        backup.fazer_backup(armazenamento.caminho_do_banco(_CAMINHO_BANCO),
+                            os.path.join(pasta, "backups"))
+        mapeamento = _persistir(lote, sobrescrever)
+        if cnpj.habilitada():
+            with st.spinner("Consultando os CNPJs na Receita Federal…"):
+                with armazenamento.sessao(_CAMINHO_BANCO) as conn:
+                    _avisar_receita(cnpj.atualizar_do_lote(conn, lote))
 
     # planilha em memória, exportação opcional: nada de cópia em disco
     buf = io.BytesIO()
@@ -536,10 +631,13 @@ with st.sidebar:
     design.marca_lateral("Mapeador Tributário PR")
 
 try:
-    with armazenamento.sessao(_CAMINHO_BANCO):
+    with _sessao_do_perfil(perfil):
         pass
-except armazenamento.SchemaMaisNovo as erro:
+except (armazenamento.SchemaMaisNovo, armazenamento.BancoIndisponivel) as erro:
     st.error(str(erro))
+    st.stop()
+except (OSError, sqlite3.Error):
+    st.error(_MSG_BANCO_INACESSIVEL)
     st.stop()
 
 _aviso = st.session_state.pop("aviso", None)   # mensagem deixada antes de um st.rerun()
@@ -607,12 +705,25 @@ if aba_processar is not None:
         resultado = st.session_state.get("resultado")
         if analise:
             _mostra_analise(analise)
+            outro = trava.situacao(_pasta_do_banco())
+            if outro is not None:
+                st.warning(f"{outro.texto()}. Ao gravar, a ferramenta espera até "
+                           f"{int(_espera_da_trava())} s pela sua vez.")
             if st.button("Gravar no banco", type="primary", key="gravar",
                          icon=":material/save:",
                          disabled=not analise["diagnostico"]["pode_continuar"]):
-                st.session_state["resultado"] = _gravar(analise, _sobrescrever_marcados(analise))
-                st.session_state.pop("analise", None)
-                st.rerun()
+                try:
+                    st.session_state["resultado"] = _gravar(
+                        analise, _sobrescrever_marcados(analise))
+                except trava.ImportacaoEmAndamento as erro:
+                    st.error(str(erro))
+                except (OSError, sqlite3.Error) as erro:
+                    st.error(f"Não foi possível gravar no banco ({erro}). Confira se a "
+                             "pasta de rede está acessível e tente de novo; a análise "
+                             "continua na tela.")
+                else:
+                    st.session_state.pop("analise", None)
+                    st.rerun()
         elif resultado:
             _mostra_resumo(resultado)
         else:
@@ -690,8 +801,11 @@ def _renderiza_consultar(conn):
 
 
 with aba_consultar:
-    with armazenamento.sessao(_CAMINHO_BANCO) as conn:
-        _renderiza_consultar(conn)
+    try:
+        with _sessao_do_perfil(perfil) as conn:
+            _renderiza_consultar(conn)
+    except (OSError, sqlite3.Error):
+        st.error(_MSG_BANCO_INACESSIVEL)
 
 # No fim do script, para ficar embaixo do conteúdo da barra lateral.
 with st.sidebar:
@@ -701,3 +815,8 @@ with st.sidebar:
         for chave in ("perfil", "resultado", "analise", "login_etapa"):
             st.session_state.pop(chave, None)
         st.rerun()
+    if _MODO_ATALHO and st.button("Encerrar ferramenta", key="encerrar",
+                                  icon=":material/power_settings_new:", width="stretch"):
+        st.success("Ferramenta encerrada. Pode fechar esta aba.")
+        _encerrar_servidor()
+        st.stop()

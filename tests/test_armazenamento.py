@@ -441,3 +441,71 @@ def test_schema_sobe_para_a_versao_atual_e_banco_v1_e_migrado(tmp_path):
 def test_lista_de_regimes_mostra_o_cnae_logo_apos_o_cnpj():
     lista = armazenamento.COLUNAS_LISTA_REGIMES
     assert lista.index('CNAE REQUERENTE') == lista.index('CNPJ REQUERENTE') + 1
+
+
+def test_sessao_leitura_nao_cria_o_arquivo_quando_o_banco_nao_existe(tmp_path):
+    caminho = tmp_path / "nao_existe.db"
+    with pytest.raises(armazenamento.BancoIndisponivel, match="ainda não existe"):
+        with armazenamento.sessao_leitura(str(caminho)):
+            pass
+    assert not caminho.exists()
+
+
+def test_sessao_leitura_le_um_banco_pronto(tmp_path):
+    caminho = str(tmp_path / "pronto.db")
+    with armazenamento.sessao(caminho):
+        pass
+    with armazenamento.sessao_leitura(caminho) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM consultas").fetchone()[0] == 0
+
+
+def test_sessao_leitura_nao_deixa_gravar(tmp_path):
+    caminho = str(tmp_path / "pronto.db")
+    with armazenamento.sessao(caminho):
+        pass
+    with armazenamento.sessao_leitura(caminho) as conn:
+        with pytest.raises(sqlite3.OperationalError):
+            conn.execute("CREATE TABLE intruso (a)")
+
+
+def test_sessao_leitura_pede_ao_administrador_quando_o_schema_e_antigo(tmp_path):
+    caminho = tmp_path / "antigo.db"
+    conn = sqlite3.connect(str(caminho))
+    conn.execute("CREATE TABLE x (a)")           # só assim o arquivo existe; user_version 0
+    conn.commit()
+    conn.close()
+    with pytest.raises(armazenamento.BancoIndisponivel, match="Administrador"):
+        with armazenamento.sessao_leitura(str(caminho)):
+            pass
+
+
+def test_sessao_leitura_recusa_banco_de_versao_mais_nova(tmp_path):
+    caminho = str(tmp_path / "novo.db")
+    conn = sqlite3.connect(caminho)
+    conn.execute("CREATE TABLE x (a)")
+    conn.execute(f"PRAGMA user_version = {armazenamento.SCHEMA_VERSAO + 1}")
+    conn.commit()
+    conn.close()
+    with pytest.raises(armazenamento.SchemaMaisNovo):
+        with armazenamento.sessao_leitura(caminho):
+            pass
+
+
+def test_conexao_espera_trinta_segundos_por_bloqueio(tmp_path):
+    conn = armazenamento.conectar(str(tmp_path / "t.db"))
+    assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 30_000
+
+
+def test_banco_novo_usa_journal_delete_e_nao_wal(tmp_path):
+    # WAL não funciona em pasta de rede: o padrão (delete) precisa ser mantido.
+    conn = armazenamento.conectar(str(tmp_path / "t.db"))
+    armazenamento.criar_esquema(conn)
+    assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+
+
+def test_pasta_dados_devolve_o_caminho_mesmo_sem_conseguir_cria_la(monkeypatch, tmp_path):
+    def falha(*a, **k):
+        raise OSError("rede fora do ar")
+    monkeypatch.setenv("MAPEADOR_DADOS", str(tmp_path / "fora"))
+    monkeypatch.setattr(armazenamento.os, "makedirs", falha)
+    assert armazenamento.pasta_dados() == str(tmp_path / "fora")

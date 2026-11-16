@@ -2,6 +2,8 @@
 import io
 import sys
 
+import pytest
+
 import iniciar
 
 
@@ -76,3 +78,119 @@ def test_endereco_com_acento_nao_quebra_em_console_ascii(monkeypatch):
     assert codigo == 0
     saida = buf.getvalue().decode('ascii')
     assert "Endere" in saida  # o 'ç' virou '?', mas não travou
+
+
+import json
+import os
+
+
+def test_segundo_clique_reabre_o_servidor_em_execucao(monkeypatch):
+    abertos, chamadas = [], []
+    monkeypatch.setattr(iniciar, '_porta_em_execucao', lambda: 8503)
+    monkeypatch.setattr(iniciar.webbrowser, 'open', lambda url: abertos.append(url))
+    monkeypatch.setattr(iniciar.subprocess, 'call', lambda *a, **k: chamadas.append(a) or 0)
+
+    assert iniciar.main() == 0
+    assert abertos == ["http://localhost:8503"]
+    assert chamadas == []          # não subiu um segundo servidor
+
+
+def test_porta_em_execucao_exige_marcador_e_servidor_saudavel(monkeypatch):
+    assert iniciar._porta_em_execucao() is None          # sem marcador
+    iniciar._registrar_servidor(8502)
+    monkeypatch.setattr(iniciar, '_saudavel', lambda porta: False)
+    assert iniciar._porta_em_execucao() is None          # marcador velho (servidor caiu)
+    monkeypatch.setattr(iniciar, '_saudavel', lambda porta: porta == 8502)
+    assert iniciar._porta_em_execucao() == 8502
+    iniciar._esquecer_servidor()
+    assert iniciar._porta_em_execucao() is None
+
+
+def test_marcador_existe_durante_o_servidor_e_some_depois(monkeypatch):
+    visto = {}
+
+    def servidor_falso(*a, **k):
+        with open(iniciar._arquivo_servidor(), encoding='utf-8') as f:
+            visto['porta'] = json.load(f)['porta']
+        return 0
+
+    monkeypatch.setattr(iniciar, '_abrir_quando_subir', lambda *a, **k: None)
+    monkeypatch.setattr(iniciar.subprocess, 'call', servidor_falso)
+    assert iniciar.main() == 0
+    assert isinstance(visto['porta'], int)
+    assert not os.path.exists(iniciar._arquivo_servidor())
+
+
+def test_sem_console_a_saida_do_servidor_vai_para_arquivo(monkeypatch):
+    monkeypatch.setattr(sys, 'stdout', None)
+    monkeypatch.setattr(sys, 'stderr', None)
+    destino = iniciar._destino_da_saida()
+    assert destino['stdin'] == iniciar.subprocess.DEVNULL
+    assert destino['stderr'] == iniciar.subprocess.STDOUT
+    assert destino['stdout'].name.endswith(os.path.join('logs', 'servidor.log'))
+    destino['stdout'].close()
+
+
+def test_com_console_nao_redireciona_nada():
+    assert iniciar._destino_da_saida() == {}
+
+
+def test_erro_de_inicializacao_sem_console_vira_caixa_de_mensagem(monkeypatch):
+    caixas = []
+    monkeypatch.setattr(sys, 'stderr', None)
+    monkeypatch.setattr(sys, 'platform', 'win32')
+    monkeypatch.setattr(iniciar, '_caixa_de_mensagem', lambda t: caixas.append(t))
+    iniciar._avisar_erro("falta o streamlit")
+    assert caixas == ["falta o streamlit"]
+
+
+def test_erro_de_inicializacao_com_console_vai_para_stderr(capsys):
+    iniciar._avisar_erro("falta o streamlit")
+    assert "falta o streamlit" in capsys.readouterr().err
+
+
+def test_clique_duplo_na_partida_espera_o_servidor_e_nao_sobe_outro(monkeypatch):
+    abertos, chamadas, saude = [], [], iter([False, False, True])
+    iniciar._registrar_servidor(8504)               # marcador recente, servidor ainda subindo
+    monkeypatch.setattr(iniciar, '_saudavel', lambda porta: next(saude))
+    monkeypatch.setattr(iniciar.time, 'sleep', lambda s: None)
+    monkeypatch.setattr(iniciar.webbrowser, 'open', lambda url: abertos.append(url))
+    monkeypatch.setattr(iniciar.subprocess, 'call', lambda *a, **k: chamadas.append(a) or 0)
+
+    assert iniciar.main() == 0
+    assert abertos == ["http://localhost:8504"]
+    assert chamadas == []
+
+
+def test_marcador_velho_nao_faz_esperar_e_sobe_normalmente(monkeypatch):
+    chamadas = []
+    iniciar._registrar_servidor(8504)
+    velho = os.path.getmtime(iniciar._arquivo_servidor()) - iniciar._ESPERA_SERVIDOR - 10
+    os.utime(iniciar._arquivo_servidor(), (velho, velho))
+    monkeypatch.setattr(iniciar, '_saudavel', lambda porta: False)
+    monkeypatch.setattr(iniciar.time, 'sleep', lambda s: pytest.fail("esperou à toa"))
+    monkeypatch.setattr(iniciar, '_abrir_quando_subir', lambda *a, **k: None)
+    monkeypatch.setattr(iniciar.subprocess, 'call', lambda *a, **k: chamadas.append(a) or 0)
+
+    assert iniciar.main() == 0
+    assert len(chamadas) == 1
+    assert '-B' in chamadas[0][0]
+
+
+def test_marcador_recente_que_nunca_fica_saudavel_cai_para_subir_um(monkeypatch):
+    chamadas = []
+    iniciar._registrar_servidor(8504)
+    monkeypatch.setattr(iniciar, '_saudavel', lambda porta: False)
+    monkeypatch.setattr(iniciar.time, 'sleep', lambda s: None)
+    monkeypatch.setattr(iniciar, '_abrir_quando_subir', lambda *a, **k: None)
+    monkeypatch.setattr(iniciar.subprocess, 'call', lambda *a, **k: chamadas.append(a) or 0)
+    assert iniciar.main() == 0
+    assert len(chamadas) == 1
+
+
+def test_esquecer_servidor_so_apaga_o_marcador_da_propria_porta():
+    iniciar._registrar_servidor(8505)
+    iniciar._esquecer_servidor(8501)                # outro servidor: mantém
+    assert os.path.exists(iniciar._arquivo_servidor())
+    iniciar._esquecer_servidor(8505)
+    assert not os.path.exists(iniciar._arquivo_servidor())
