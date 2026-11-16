@@ -28,6 +28,28 @@ _ANCORA_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Layout de Delegacia Regional ("REGIME ESPECIAL DE RECOLHIMENTO DO ICMS
+# Nº1.456"): sem "/ano" no título e com "PROTOCOLO" na linha seguinte. Esse
+# "PROTOCOLO" é o que distingue o título da CITAÇÃO do regime que a própria
+# nota fiscal deve conter (“REGIME ESPECIAL DE RECOLHIMENTO DO ICMS Nº 1.456”),
+# que vem entre aspas e seguida de ponto. Case-sensitive de propósito.
+_ANCORA_DELEGACIA = re.compile(
+    r'REGIME\s+ESPECIAL\s+DE(?:\s+[A-ZÀ-Ü]+){1,8}?\s+N[ºo°]\s*([\d\.]+)\s*\n\s*PROTOCOLO'
+)
+
+# O Diário traz várias matérias por página; a deste layout termina na linha
+# "Protocolo NNNNNN/AAAA". Sem esse recorte a fatia iria até o fim do texto e
+# _vigencia leria "eficácia se encerra em…" de outra matéria.
+_FIM_DA_MATERIA = re.compile(r'\n\s*Protocolo\s+\d+/\d{4}')
+
+# Linha de assinatura ("Pato Branco/PR, 11 de Agosto de 2026 José Antonio
+# Sarturi"): fecha a lista de procedimentos e traz o ano como último recurso.
+_ASSINATURA_DELEGACIA = re.compile(
+    r'\n[^\n]*/[A-Z]{2},\s*\d{1,2}\s+de\s+\w+\s+de\s+\d{4}')
+
+_PROCEDIMENTOS_DELEGACIA = re.compile(
+    r'autoriza\s+os\s+seguintes\s+procedimentos\s*:\s*\n', re.IGNORECASE)
+
 # Qualquer título de matéria em caixa alta, com ou sem o cabeçalho acima.
 # Citações no corpo ("Regime Especial nº 6.247/2019") são caixa mista e,
 # por ser case-sensitive, este regex não as pega.
@@ -51,7 +73,7 @@ def _data_edicao_iso(txt: str) -> str:
 
 
 def _campo(fatia: str, rotulo: str) -> str:
-    m = re.search(rf'{rotulo}:\s*(.+)', fatia, re.IGNORECASE)
+    m = re.search(rf'{rotulo}\s*:\s*(.+)', fatia, re.IGNORECASE)
     return m.group(1).strip() if m else ""
 
 
@@ -60,7 +82,8 @@ def _campo(fatia: str, rotulo: str) -> str:
 # teto, um rótulo distante puxaria parágrafos inteiros). Sem rótulo dentro
 # desse alcance, cai no comportamento de uma linha.
 _BENEFICIARIA = re.compile(
-    r'BENEFICI[ÁA]RIA:\s*(.{1,200}?)\s*(?=CAD/ICMS:|CNPJ:|ENDERE[ÇC]O:|EMENTA:)',
+    r'(?:BENEFICI[ÁA]RIA|CONTRIBUINTE)\s*:\s*(.{1,200}?)\s*'
+    r'(?=CAD/ICMS\s*:|CNPJ\s*:|ENDERE[ÇC]O\s*:|EMENTA\s*:|S[úu]mula\s*[-–])',
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -72,18 +95,18 @@ def _beneficiaria(fatia: str) -> str:
 
 
 def _cnpj(fatia: str) -> str:
-    m = re.search(r'CNPJ:\s*([\d\.\/-]+)', fatia, re.IGNORECASE)
+    m = re.search(r'CNPJ\s*:\s*([\d\.\/-]+)', fatia, re.IGNORECASE)
     return m.group(1).strip() if m else ""
 
 
 def _cad_icms(fatia: str) -> str:
-    m = re.search(r'CAD/ICMS:\s*([\d\.\-]+)', fatia, re.IGNORECASE)
+    m = re.search(r'CAD/ICMS\s*:\s*([\d\.\-]+)', fatia, re.IGNORECASE)
     return m.group(1).strip() if m else ""
 
 
 def _ementa(fatia: str) -> str:
     m = re.search(
-        r'EMENTA:\s*(.+?)(?:Diante do previsto|A Diretora|O Diretor|'
+        r'(?:EMENTA\s*:|S[úu]mula\s*[-–])\s*(.+?)(?:Diante do previsto|A Diretora|O Diretor|O Delegado|'
         r'\n\s*1\.\s|\n\s*\d+\.\s*O\s|\Z)',
         fatia, re.DOTALL | re.IGNORECASE,
     )
@@ -101,8 +124,8 @@ def _vigencia(fatia: str) -> str:
 
 
 def _classifica(fatia: str) -> str:
-    tem_beneficiaria = re.search(r'BENEFICI[ÁA]RIA:', fatia, re.IGNORECASE)
-    tem_ementa = re.search(r'EMENTA:', fatia, re.IGNORECASE)
+    tem_beneficiaria = re.search(r'(?:BENEFICI[ÁA]RIA|CONTRIBUINTE)\s*:', fatia, re.IGNORECASE)
+    tem_ementa = re.search(r'EMENTA\s*:|S[úu]mula\s*[-–]', fatia, re.IGNORECASE)
     eh_revogacao = re.search(r'DESPACHO\s+N[ºo°].*?Revog', fatia,
                              re.IGNORECASE | re.DOTALL)
     if eh_revogacao and not tem_beneficiaria:
@@ -184,6 +207,26 @@ def _extrai_beneficios_procedimentos(fatia: str) -> str:
     return re.sub(r'\s+', ' ', fatia[inicio:fim]).strip()
 
 
+def _extrai_procedimentos_delegacia(fatia: str) -> str:
+    """Lista numerada que segue "autoriza os seguintes procedimentos:", até a
+    linha de assinatura. Vazio se o layout não for o de Delegacia."""
+    m_inicio = _PROCEDIMENTOS_DELEGACIA.search(fatia)
+    if not m_inicio:
+        return ""
+    resto = fatia[m_inicio.end():]
+    m_fim = _ASSINATURA_DELEGACIA.search(resto)
+    return re.sub(r'\s+', ' ', resto[:m_fim.start() if m_fim else len(resto)]).strip()
+
+
+def _ano_do_regime(data_ed: str, fatia: str) -> str:
+    """O título deste layout não traz o ano: usa o da edição do Diário e, sem
+    ela, o da linha de assinatura."""
+    if re.fullmatch(r'\d{4}-\d{2}-\d{2}', data_ed):
+        return data_ed[:4]
+    m = _ASSINATURA_DELEGACIA.search(fatia)
+    return re.search(r'(\d{4})\s*$', m.group(0)).group(1) if m else ""
+
+
 def _pr_competitivo(ementa: str) -> str:
     if re.search(r'paran[áa]\s+competitivo|protocolo de inten', ementa, re.IGNORECASE):
         return 'Sim'
@@ -204,15 +247,24 @@ def parse(texto: str):
     # real: "DOS PROCEDIMENTOS ESPECIAIS" do Regime Especial nº 8.715/2025).
     texto = _CABECALHO_DE_PAGINA.sub('\n', texto)
 
-    ancoras = list(_ANCORA_RE.finditer(texto))
+    ancoras = sorted(
+        [(m, 'fiscalizacao') for m in _ANCORA_RE.finditer(texto)]
+        + [(m, 'delegacia') for m in _ANCORA_DELEGACIA.finditer(texto)],
+        key=lambda par: par[0].start())
     registros, descartes = [], []
 
-    for i, anc in enumerate(ancoras):
+    for i, (anc, layout) in enumerate(ancoras):
         inicio = anc.start()
-        fim = ancoras[i + 1].start() if i + 1 < len(ancoras) else len(texto)
+        fim = ancoras[i + 1][0].start() if i + 1 < len(ancoras) else len(texto)
+        if layout == 'delegacia':
+            m_fim = _FIM_DA_MATERIA.search(texto, anc.end(), fim)
+            if m_fim:
+                fim = m_fim.start()
         fatia = texto[inicio:fim]
         tipo = _classifica(fatia)
-        num_re = f"{anc.group(1)}/{anc.group(2)}"
+        ano = (anc.group(2) if layout == 'fiscalizacao'
+               else _ano_do_regime(data_ed, fatia))
+        num_re = f"{anc.group(1)}/{ano}"
 
         if tipo != 'concessao_ou_alteracao':
             benef = _beneficiaria(fatia) or _campo(fatia, 'INTERESSADO')
@@ -221,7 +273,7 @@ def parse(texto: str):
 
         ementa = _ementa(fatia)
         registros.append({
-            'ANO': anc.group(2),
+            'ANO': ano,
             'DATA': data_ed,
             'Nº DOE': n_doe,
             'RE PR COMPETITIVO': _pr_competitivo(ementa),
@@ -234,11 +286,12 @@ def parse(texto: str):
             'VIGÊNCIA DO RE': _vigencia(fatia),
             'EMENTA': ementa,
             'ABRANGÊNCIA': _extrai_abrangencia(fatia),
-            'BENEFÍCIOS/PROCEDIMENTOS': _extrai_beneficios_procedimentos(fatia),
+            'BENEFÍCIOS/PROCEDIMENTOS': (_extrai_beneficios_procedimentos(fatia)
+                                         or _extrai_procedimentos_delegacia(fatia)),
             'DISPOSIÇÕES GERAIS': _extrai_disposicoes_gerais(fatia),
         })
 
-    descartes.extend(_titulos_sem_ancora(texto, ancoras))
+    descartes.extend(_titulos_sem_ancora(texto, [a for a, _ in ancoras]))
     return registros, descartes
 
 

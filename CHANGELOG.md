@@ -1,5 +1,12 @@
 # Histórico de versões
 
+## 0.9.1
+- **Correção no parser de regimes**: rótulos com espaço antes dos dois-pontos (ex.: `CAD/ICMS :61700643-03`, presente no Regime Especial nº 8.715/2025) não corrompem mais a EMPRESA nem deixam o CAD/ICMS vazio. Vale também para `CNPJ :`, `BENEFICIÁRIA :` e `EMENTA :`.
+- **Correção no parser de consultas**: o rodapé de página com número de 3 dígitos (documentos de 100+ páginas) deixa de sobrar dentro dos campos.
+- Novos avisos de diagnóstico: `A305` (nome da empresa que traz um rótulo do cabeçalho, como `CAD/ICMS:` ou `CNPJ:`) e `A306` (regime sem CAD/ICMS). Ambos aparecem antes de gravar e não bloqueiam.
+- **Novo layout de regime**: o Regime Especial de Recolhimento do ICMS de Delegacia Regional (título sem ano, `CONTRIBUINTE:`/`Súmula`) passa a ser importado; antes o PDF resultava em `A401 — Nenhum registro extraído`. A vigência fica vazia quando o ato não declara prazo (aviso `A303`).
+- Regimes já gravados com o defeito só se corrigem reimportando o PDF; os campos ajustados à mão são preservados pela reimportação.
+
 ## 0.9.0
 - **Consulta do CNPJ na BrasilAPI**: ao gravar, o CNPJ de cada regime é consultado (CNAE principal e situação cadastral). O resultado fica à parte do regime e aparece no detalhe, para qualquer perfil.
 - O CNAE da Receita é o **atual** da empresa, então nunca sobrescreve o regime sozinho: se o regime já tem um CNAE diferente, o detalhe avisa; o administrador pode **aplicar** o CNAE da Receita ao regime (fica no histórico como ajuste manual) e **atualizar** a consulta quando quiser.

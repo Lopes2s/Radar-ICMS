@@ -11,6 +11,8 @@ _ISO = re.compile(r'\d{4}-\d{2}-\d{2}')
 _PESOS_1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
 _PESOS_2 = [6] + _PESOS_1
 _MAX_ITENS_NO_TEXTO = 5
+_ROTULO_NO_NOME = re.compile(
+    r'\b(?:CAD/ICMS|CNPJ|ENDERE[ÇC]O|EMENTA|BENEFICI[ÁA]RIA)\s*:', re.IGNORECASE)
 
 _CATALOGO = {
     'A001': 'Tipo de arquivo não identificado',
@@ -21,6 +23,8 @@ _CATALOGO = {
     'A302': 'CNPJ do requerente inválido',
     'A303': 'Regime sem vigência',
     'A304': 'Data do regime fora do padrão AAAA-MM-DD',
+    'A305': 'Nome da empresa contém rótulo do cabeçalho',
+    'A306': 'Regime sem CAD/ICMS',
     'A401': 'Nenhum registro extraído',
 }
 
@@ -79,6 +83,10 @@ def diagnosticar(lote) -> dict:
             achados['A303'].append((ref, arq))
         if not _ISO.fullmatch(str(r.get('DATA', '') or '')):
             achados['A304'].append((ref, arq))
+        if _ROTULO_NO_NOME.search(str(r.get('EMPRESA', '') or '')):
+            achados['A305'].append((ref, arq))
+        if not str(r.get('CAD/ICMS', '') or '').strip():
+            achados['A306'].append((ref, arq))
 
     tem_registros = bool(lote.consultas or lote.regimes)
     if not tem_registros:
