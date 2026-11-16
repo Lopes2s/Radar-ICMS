@@ -127,6 +127,7 @@ Códigos do diagnóstico:
 | `A201` / `A202` / `A203` | aviso | consulta sem resposta / sem súmula / data fora de AAAA-MM-DD |
 | `A301` / `A302` | aviso | regime sem CNPJ do requerente / CNPJ inválido (dígitos verificadores) |
 | `A303` / `A304` | aviso | regime sem vigência / data fora de AAAA-MM-DD |
+| `A305` / `A306` | aviso | nome da empresa contém rótulo do cabeçalho (`CAD/ICMS:`, `CNPJ:` …) / regime sem CAD/ICMS |
 | `A401` | aviso | nenhum registro extraído (bloqueia a gravação) |
 
 ### Aba "Consultar"

@@ -14,7 +14,7 @@ def _consulta(**campos):
 
 def _regime(**campos):
     base = {'Nº DO REGIME ESPECIAL': '1/2026', 'CNPJ REQUERENTE': '11.222.333/0001-81',
-            'DATA': '2026-03-01', 'VIGÊNCIA DO RE': '12 meses'}
+            'CAD/ICMS': '12345678-90', 'DATA': '2026-03-01', 'VIGÊNCIA DO RE': '12 meses'}
     return {**base, **campos}
 
 
@@ -91,3 +91,53 @@ def test_lote_sem_registros_avisa_e_nao_pode_continuar():
 def test_lote_totalmente_vazio_nao_quebra():
     diag = diagnostico.diagnosticar(pipeline.Lote())
     assert diag['pode_continuar'] is False
+
+
+def test_empresa_com_rotulo_do_cabecalho_gera_aviso_a305():
+    lote = pipeline.Lote(
+        regimes=[
+            _regime(**{'Nº DO REGIME ESPECIAL': '1/2026',
+                       'EMPRESA': 'ACME LTDA CAD/ICMS :123'}),
+            _regime(**{'Nº DO REGIME ESPECIAL': '2/2026',
+                       'EMPRESA': 'BETA S.A. CNPJ: 11.222.333/0001-81'}),
+            _regime(**{'Nº DO REGIME ESPECIAL': '3/2026',
+                       'EMPRESA': 'GAMA LTDA'}),
+        ],
+        arquivos=[_arq('r.pdf', tipo='regime')])
+    diag = diagnostico.diagnosticar(lote)
+    assert _codigos(diag) == ['A305']
+    msg = diag['mensagens'][0]
+    assert msg['nivel'] == 'aviso'
+    assert '1/2026' in msg['texto'] and '2/2026' in msg['texto']
+    assert '3/2026' not in msg['texto']
+    assert diag['pode_continuar'] is True
+
+
+def test_empresa_sem_rotulo_ou_ausente_nao_gera_a305():
+    lote = pipeline.Lote(
+        regimes=[_regime(**{'EMPRESA': 'INDÚSTRIA E COMÉRCIO DE ENDERECOS LTDA'}),
+                 _regime(**{'Nº DO REGIME ESPECIAL': '2/2026'})],
+        arquivos=[_arq('r.pdf', tipo='regime')])
+    assert _codigos(diagnostico.diagnosticar(lote)) == []
+
+
+def test_regime_sem_cad_icms_gera_aviso_a306():
+    lote = pipeline.Lote(
+        regimes=[_regime(**{'Nº DO REGIME ESPECIAL': '1/2026', 'CAD/ICMS': ''}),
+                 _regime(**{'Nº DO REGIME ESPECIAL': '2/2026', 'CAD/ICMS': '   '}),
+                 _regime(**{'Nº DO REGIME ESPECIAL': '3/2026'})],
+        arquivos=[_arq('r.pdf', tipo='regime')])
+    diag = diagnostico.diagnosticar(lote)
+    assert _codigos(diag) == ['A306']
+    msg = diag['mensagens'][0]
+    assert msg['nivel'] == 'aviso'
+    assert '1/2026' in msg['texto'] and '2/2026' in msg['texto']
+    assert '3/2026' not in msg['texto']
+    assert diag['pode_continuar'] is True
+
+
+def test_regime_sem_a_chave_cad_icms_tambem_gera_a306():
+    regime = _regime()
+    del regime['CAD/ICMS']
+    lote = pipeline.Lote(regimes=[regime], arquivos=[_arq('r.pdf', tipo='regime')])
+    assert _codigos(diagnostico.diagnosticar(lote)) == ['A306']
