@@ -206,7 +206,7 @@ def main():
     # gatherUsageStats=false: nada de telemetria saindo da máquina.
     _registrar_servidor(porta)
     try:
-        return subprocess.call([sys.executable, '-B', '-m', 'streamlit', 'run', app,
+        return subprocess.call([sys.executable, '-m', 'streamlit', 'run', app,
                                 '--server.port', str(porta),
                                 '--server.address', '127.0.0.1',
                                 '--server.headless', 'true',

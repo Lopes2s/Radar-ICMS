@@ -4,7 +4,7 @@ Ferramenta local que lê PDFs da SEFA-PR (consultas tributárias) e do Diário
 Oficial (regimes especiais), extrai os campos objetivos, mapeia tudo num banco
 SQLite e permite consultar o que foi mapeado por uma interface web (Streamlit).
 
-Versão atual: **0.10.0** (histórico em [`CHANGELOG.md`](CHANGELOG.md)).
+Versão atual: **0.10.1** (histórico em [`CHANGELOG.md`](CHANGELOG.md)).
 
 ## Sumário
 1. [O que a ferramenta faz](#1-o-que-a-ferramenta-faz)
@@ -328,23 +328,29 @@ dados temporária (`tests/conftest.py`), nunca o banco real do projeto.
 
 ## 10. Distribuição
 ### Pela rede (recomendado)
-Uma pasta de rede acessível a todos guarda tudo; cada pessoa roda o servidor na
-própria máquina (`127.0.0.1`) e lê/grava o mesmo banco.
+A pasta de rede guarda o **pacote** do programa e o **banco**; cada pessoa roda o
+servidor na própria máquina (`127.0.0.1`), a partir de uma **cópia local** do programa
+(`%LOCALAPPDATA%\RadarICMS\app`), e lê/grava o mesmo banco. Rodar o Python direto da
+rede é inviável (minutos para abrir): por isso o `Radar ICMS.vbs` baixa o pacote sozinho.
 
 ```
 \\rede\Radar ICMS\
   Radar ICMS.vbs    duplo clique, sem janela de console
-  app\              código + python\ (Python portátil com as dependências)
+  programa\         programa-<versão>.zip (código + Python portátil), versao.txt, atualizar_local.ps1
   dados\            mapeamento.db e backups\
 ```
 
-**Montar ou atualizar** (por quem mantém a ferramenta, com internet, na raiz do repositório):
+**Montar ou atualizar** (por quem mantém a ferramenta, com internet, na raiz do repositório). O
+script monta o programa numa pasta local (`%LOCALAPPDATA%\RadarICMS-montagem`), empacota num
+`.zip` e publica em `programa\`. Se existir uma pasta `app\` do modelo antigo na rede, pode apagá-la:
 
 ```powershell
 .\scripts\montar_rede.ps1 -Destino "\\servidor\pasta\Radar ICMS"
 ```
 
-Cada usuário cria um atalho para `Radar ICMS.vbs` na área de trabalho. A janela do
+Cada usuário cria um atalho para `Radar ICMS.vbs` na área de trabalho. Na **primeira abertura**
+(e quando você publicar uma versão nova) o `.vbs` copia o pacote para o computador e extrai,
+com um aviso "Preparando…" (alguns minutos, uma vez); depois abre em segundos. A janela do
 navegador abre sozinha; **Encerrar ferramenta** (barra lateral) ou 10 minutos sem
 navegador desligam o servidor local. Um segundo clique no atalho reabre o que já está aberto.
 
@@ -357,13 +363,15 @@ navegador desligam o servidor local. Um segundo clique no atalho reabre o que j�
   Para restaurar, feche a ferramenta em todas as máquinas e substitua `mapeamento.db` por uma cópia.
 - **Perfil Consulta:** abre o banco somente leitura. Se o banco ainda não existe ou foi
   atualizado por uma versão nova, a tela pede ao Administrador abrir a ferramenta primeiro.
-- **Senha do Administrador:** não deixe `secrets.toml` em `app\.streamlit\` (todos leriam).
+- **Senha do Administrador:** não deixe `secrets.toml` dentro do pacote (todos leriam).
   Crie `%USERPROFILE%\.streamlit\secrets.toml` no computador do Administrador, com a seção
   `[admin]` e a chave `senha`; o Streamlit lê esse arquivo também.
-- **Atualizar a ferramenta:** peça a todos para clicarem em **Encerrar ferramenta** e rode o script;
-  ele recusa atualizar se detectar a ferramenta em uso (o Windows trava o Python portátil
-  enquanto alguém o usa). `-Forcar` ignora a checagem.
-- **Logs:** ficam em `%LOCALAPPDATA%\MapeadorPR\logs` de cada usuário.
+- **Atualizar a ferramenta:** commite a mudança e rode `montar_rede.ps1` de novo, a qualquer hora
+  (ninguém executa arquivos da rede). Na próxima abertura de cada pessoa o `.vbs` vê que a versão
+  mudou e atualiza a cópia local sozinho. Quem estiver com a ferramenta aberta continua na versão
+  antiga até fechar (**Encerrar ferramenta**) e abrir de novo.
+- **Logs:** ficam em `%LOCALAPPDATA%\MapeadorPR\logs` de cada usuário; o log da cópia/atualização
+  do programa é `%LOCALAPPDATA%\RadarICMS\atualizacao.log`.
 - **Duas pessoas importando ao mesmo tempo não é suportado**: a trava só impede, não enfileira.
 
 ### Por arquivo zip (uma cópia por máquina)

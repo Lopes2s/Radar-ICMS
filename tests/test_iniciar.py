@@ -174,7 +174,7 @@ def test_marcador_velho_nao_faz_esperar_e_sobe_normalmente(monkeypatch):
 
     assert iniciar.main() == 0
     assert len(chamadas) == 1
-    assert '-B' in chamadas[0][0]
+    assert chamadas[0][0][1:3] == ['-m', 'streamlit']
 
 
 def test_marcador_recente_que_nunca_fica_saudavel_cai_para_subir_um(monkeypatch):
