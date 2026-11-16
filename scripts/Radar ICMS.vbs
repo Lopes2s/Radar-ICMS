@@ -52,6 +52,12 @@ Function Atualizada()
     Atualizada = fso.FileExists(python) And (VersaoDe(base & "\versao.txt") = VersaoDe(rede & "\versao.txt"))
 End Function
 
+' Volta a pasta antiga ao lugar quando a atualizacao falha no meio.
+Sub Restaurar(velho)
+    On Error Resume Next
+    If fso.FolderExists(velho) And Not fso.FolderExists(localApp) Then fso.MoveFolder velho, localApp
+End Sub
+
 Sub Apagar(caminho)
     On Error Resume Next
     If fso.FileExists(caminho) Then fso.DeleteFile caminho, True
@@ -100,35 +106,46 @@ Function Preparar()
     pacote = rede & "\programa-" & versaoRede & ".zip"
     Apagar zipLocal
     Apagar novo
+    Restaurar velho
     Apagar velho
 
-    Err.Clear
-    fso.CopyFile pacote, zipLocal, True
-    If Err.Number <> 0 Then Registrar "FALHA ao copiar o pacote: " & Err.Description: Apagar trava: Exit Function
-    fso.CreateFolder novo
-    codigo = sh.Run("""" & tar & """ -xf """ & zipLocal & """ -C """ & novo & """", 0, True)
-    If codigo <> 0 Or Not fso.FileExists(novo & "\python\pythonw.exe") Then
-        Registrar "FALHA ao extrair o pacote (tar.exe codigo " & codigo & ")"
-        Apagar novo: Apagar zipLocal: Apagar trava
-        Exit Function
-    End If
-
-    ' Trocar a pasta antiga: mover falha por inteiro (nada apagado pela metade) se alguem
-    ' estiver usando a ferramenta (o Windows trava o Python em uso).
+    ' Primeiro a pasta antiga: mover falha por inteiro (nada apagado pela metade) se alguem
+    ' estiver usando a ferramenta (o Windows trava o Python em uso). Assim nao se copia o
+    ' pacote a toa; se algo falhar adiante, ela volta ao lugar.
     If fso.FolderExists(localApp) Then
         Err.Clear
         fso.MoveFolder localApp, velho
         If Err.Number <> 0 Then
             Registrar "Copia local em uso, atualizacao adiada: " & Err.Description
             Err.Clear
-            Apagar novo: Apagar zipLocal: Apagar trava
+            Apagar trava
             Preparar = 3
             Exit Function
         End If
     End If
+
+    Err.Clear
+    fso.CopyFile pacote, zipLocal, True
+    If Err.Number <> 0 Then
+        Registrar "FALHA ao copiar o pacote: " & Err.Description
+        Restaurar velho: Apagar trava
+        Exit Function
+    End If
+    fso.CreateFolder novo
+    codigo = sh.Run("""" & tar & """ -xf """ & zipLocal & """ -C """ & novo & """", 0, True)
+    If codigo <> 0 Or Not fso.FileExists(novo & "\python\pythonw.exe") Then
+        Registrar "FALHA ao extrair o pacote (tar.exe codigo " & codigo & ")"
+        Apagar novo: Apagar zipLocal: Restaurar velho: Apagar trava
+        Exit Function
+    End If
+
     Err.Clear
     fso.MoveFolder novo, localApp
-    If Err.Number <> 0 Then Registrar "FALHA ao instalar a copia local: " & Err.Description: Apagar trava: Exit Function
+    If Err.Number <> 0 Then
+        Registrar "FALHA ao instalar a copia local: " & Err.Description
+        Restaurar velho: Apagar trava
+        Exit Function
+    End If
     Set f = fso.CreateTextFile(base & "\versao.txt", True)
     f.WriteLine versaoRede
     f.Close
