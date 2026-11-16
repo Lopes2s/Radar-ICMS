@@ -57,6 +57,14 @@ def test_atalho_troca_a_pasta_sem_apagar_pela_metade():
     assert "atualizando.lock" in texto         # dois cliques seguidos nao copiam duas vezes
 
 
+def test_script_de_montagem_inclui_a_senha_do_administrador_no_pacote():
+    caminho = os.path.join(RAIZ, "scripts", "montar_rede.ps1")
+    with open(caminho, encoding="utf-8") as arquivo:
+        texto = arquivo.read()
+    assert ".streamlit" in texto and "secrets.toml" in texto
+    assert texto.index("secrets.toml") < texto.index("tar.exe")     # entra antes de empacotar
+
+
 def test_script_de_montagem_aborta_em_falha_de_comando_nativo():
     caminho = os.path.join(RAIZ, "scripts", "montar_rede.ps1")
     with open(caminho, encoding="utf-8") as arquivo:

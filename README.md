@@ -363,7 +363,12 @@ navegador desligam o servidor local. Um segundo clique no atalho reabre o que j�
   Para restaurar, feche a ferramenta em todas as máquinas e substitua `mapeamento.db` por uma cópia.
 - **Perfil Consulta:** abre o banco somente leitura. Se o banco ainda não existe ou foi
   atualizado por uma versão nova, a tela pede ao Administrador abrir a ferramenta primeiro.
-- **Senha do Administrador:** não deixe `secrets.toml` dentro do pacote (todos leriam).
+- **Senha do Administrador (fixa):** o `montar_rede.ps1` inclui no pacote o `.streamlit\secrets.toml` do
+  repositório (seção `[admin]`, chave `senha`); todo usuário recebe a mesma senha na cópia local,
+  sem criar arquivo. Para trocar a senha, edite esse arquivo, rode o script de novo e cada pessoa
+  recebe a nova na próxima abertura. Atenção: quem puder ler a pasta de rede consegue ler a senha
+  (está dentro do zip). Se preferir não distribuí-la, apague o `secrets.toml` do repositório antes
+  de montar e crie `%USERPROFILE%\.streamlit\secrets.toml` só nos computadores dos administradores.
   Crie `%USERPROFILE%\.streamlit\secrets.toml` no computador do Administrador, com a seção
   `[admin]` e a chave `senha`; o Streamlit lê esse arquivo também.
 - **Atualizar a ferramenta:** commite a mudança e rode `montar_rede.ps1` de novo, a qualquer hora

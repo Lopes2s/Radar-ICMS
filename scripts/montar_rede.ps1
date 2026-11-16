@@ -39,6 +39,17 @@ git -C $raizRepo archive --format=zip -o $zipCodigo HEAD
 if ($LASTEXITCODE -ne 0) { throw "Falha no passo 1: git archive nao gerou o codigo." }
 Expand-Archive $zipCodigo -DestinationPath $app -Force
 
+# Senha fixa do Administrador: o secrets.toml do repositorio (nao versionado) entra no pacote,
+# e todo usuario recebe a mesma senha sem criar arquivo. Quem le a pasta de rede a le tambem.
+$secrets = Join-Path $raizRepo ".streamlit\secrets.toml"
+if (Test-Path $secrets) {
+    New-Item -ItemType Directory -Force (Join-Path $app ".streamlit") | Out-Null
+    Copy-Item $secrets (Join-Path $app ".streamlit\secrets.toml") -Force
+    Write-Host "Senha do Administrador incluida no pacote (.streamlit\secrets.toml)."
+} else {
+    Write-Warning "Sem .streamlit\secrets.toml no repositorio: o perfil Administrador ficara desabilitado."
+}
+
 # 2. Python portatil (embeddable), so na primeira vez.
 if (-not (Test-Path (Join-Path $py "python.exe"))) {
     $zipPython = Join-Path $tmp "python-embed.zip"
