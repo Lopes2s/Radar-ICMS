@@ -24,7 +24,10 @@ from core.execucao import Execucao  # noqa: E402
 from core.pdf_text import MARCA_CITACAO  # noqa: E402
 from interface import design, formularios  # noqa: E402
 
-log.configurar_log(armazenamento.pasta_dados())
+try:
+    log.configurar_log(armazenamento.pasta_dados())
+except OSError:      # pasta de rede fora do ar: a tela de erro abaixo ainda precisa aparecer
+    pass
 
 # Modo atalho: aberto por Mapeador.vbs (MAPEADOR_MODO_ATALHO=1). Liga o botão
 # Encerrar e o desligamento por ociosidade; fora dele (streamlit run, testes) nada disso existe.
@@ -88,6 +91,10 @@ def _escrevendo():
     """Segura a trava de gravação durante uma escrita (importação ou edição manual).
     `trava.ImportacaoEmAndamento` se, passada a espera, outra pessoa ainda estiver gravando."""
     return trava.importando(_pasta_do_banco(), esperar_s=_espera_da_trava())
+
+
+_MSG_BANCO_INACESSIVEL = ("Não foi possível abrir o banco na pasta de rede. Confira se a "
+                          "pasta está acessível e recarregue a página.")
 
 
 def _sessao_do_perfil(perfil_atual):
@@ -219,6 +226,9 @@ def _salvar_edicao(tipo: str, registro: dict, colunas: list, prefixo: str):
     except trava.ImportacaoEmAndamento as erro:
         st.session_state["erro_edicao"] = str(erro)
         return
+    except (OSError, sqlite3.Error) as erro:
+        st.session_state["erro_edicao"] = f"Não foi possível gravar no banco ({erro}). Confira a pasta de rede e tente de novo."
+        return
     st.session_state.pop("erro_edicao", None)
     _avisar(r, "Ato atualizado")
     _fecha_selecao_da_tabela()
@@ -241,6 +251,10 @@ def _consultar_cnpj(cnpj_do_regime: str):
             resumo = cnpj.atualizar(conn, [cnpj_do_regime], forcar=True)
     except trava.ImportacaoEmAndamento as erro:
         st.session_state["aviso"] = str(erro)
+        _fecha_selecao_da_tabela()
+        return
+    except (OSError, sqlite3.Error) as erro:
+        st.session_state["aviso"] = f"Não foi possível gravar no banco ({erro}). Confira a pasta de rede e tente de novo."
         _fecha_selecao_da_tabela()
         return
     if resumo["consultados"]:
@@ -266,6 +280,9 @@ def _aplicar_cnae(registro: dict, receita: dict):
         return
     except trava.ImportacaoEmAndamento as erro:
         st.session_state["aviso"] = str(erro)
+        return
+    except (OSError, sqlite3.Error) as erro:
+        st.session_state["aviso"] = f"Não foi possível gravar no banco ({erro}). Confira a pasta de rede e tente de novo."
         return
     _avisar(r, "CNAE aplicado")
     _fecha_selecao_da_tabela()
@@ -619,6 +636,9 @@ try:
 except (armazenamento.SchemaMaisNovo, armazenamento.BancoIndisponivel) as erro:
     st.error(str(erro))
     st.stop()
+except (OSError, sqlite3.Error):
+    st.error(_MSG_BANCO_INACESSIVEL)
+    st.stop()
 
 _aviso = st.session_state.pop("aviso", None)   # mensagem deixada antes de um st.rerun()
 if _aviso:
@@ -781,8 +801,11 @@ def _renderiza_consultar(conn):
 
 
 with aba_consultar:
-    with _sessao_do_perfil(perfil) as conn:
-        _renderiza_consultar(conn)
+    try:
+        with _sessao_do_perfil(perfil) as conn:
+            _renderiza_consultar(conn)
+    except (OSError, sqlite3.Error):
+        st.error(_MSG_BANCO_INACESSIVEL)
 
 # No fim do script, para ficar embaixo do conteúdo da barra lateral.
 with st.sidebar:

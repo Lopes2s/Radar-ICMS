@@ -119,9 +119,13 @@ def versao_do_schema(conn: sqlite3.Connection) -> int:
 
 def pasta_dados() -> str:
     """Pasta do banco e dos logs: `MAPEADOR_DADOS` ou a raiz do projeto.
-    É criada se não existir."""
+    É criada se não existir; se não der (pasta de rede fora do ar), devolve o
+    caminho mesmo assim e quem for abrir o banco recebe o erro."""
     pasta = os.environ.get('MAPEADOR_DADOS') or _RAIZ
-    os.makedirs(pasta, exist_ok=True)
+    try:
+        os.makedirs(pasta, exist_ok=True)
+    except OSError:
+        pass
     return pasta
 
 

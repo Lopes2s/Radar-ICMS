@@ -501,3 +501,11 @@ def test_banco_novo_usa_journal_delete_e_nao_wal(tmp_path):
     conn = armazenamento.conectar(str(tmp_path / "t.db"))
     armazenamento.criar_esquema(conn)
     assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+
+
+def test_pasta_dados_devolve_o_caminho_mesmo_sem_conseguir_cria_la(monkeypatch, tmp_path):
+    def falha(*a, **k):
+        raise OSError("rede fora do ar")
+    monkeypatch.setenv("MAPEADOR_DADOS", str(tmp_path / "fora"))
+    monkeypatch.setattr(armazenamento.os, "makedirs", falha)
+    assert armazenamento.pasta_dados() == str(tmp_path / "fora")

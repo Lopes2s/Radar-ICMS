@@ -1108,3 +1108,92 @@ def test_botao_encerrar_agenda_o_desligamento(monkeypatch):
     assert not at.exception
     assert [a for a in agendados if a[1] is os._exit] == [(1.0, os._exit, (0,))]
     assert any("Pode fechar esta aba" in s.value for s in at.success)
+
+
+# --- pasta de rede fora do ar / banco com erro de E/S ------------------------------
+
+def _falha_depois_de(monkeypatch, nome, primeiras_ok):
+    """Faz `armazenamento.<nome>` abrir normalmente nas `primeiras_ok` chamadas e,
+    depois, levantar sqlite3.OperationalError (a pasta de rede caiu)."""
+    original = getattr(armazenamento, nome)
+    chamadas = {"n": 0}
+
+    def falso(*args, **kwargs):
+        chamadas["n"] += 1
+        if chamadas["n"] > primeiras_ok:
+            raise sqlite3.OperationalError("unable to open database file")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(armazenamento, nome, falso)
+
+
+@pytest.mark.parametrize("perfil,nome", [("admin", "sessao"), ("consulta", "sessao_leitura")])
+def test_banco_inacessivel_na_entrada_mostra_mensagem_amigavel(monkeypatch, perfil, nome):
+    _falha_depois_de(monkeypatch, nome, 0)
+    at = _app(perfil).run(timeout=30)
+    assert not at.exception
+    assert any("pasta de rede" in e.value and "recarregue" in e.value for e in at.error)
+
+
+@pytest.mark.parametrize("perfil,nome", [("admin", "sessao"), ("consulta", "sessao_leitura")])
+def test_banco_inacessivel_na_aba_consultar_mostra_mensagem_amigavel(monkeypatch, perfil, nome):
+    _falha_depois_de(monkeypatch, nome, 1)       # passa na checagem do perfil, cai na aba
+    at = _app(perfil).run(timeout=30)
+    assert not at.exception
+    assert any("pasta de rede" in e.value and "recarregue" in e.value for e in at.error)
+
+
+def test_pasta_de_rede_inexistente_nao_derruba_o_app(monkeypatch, tmp_path):
+    inexistente = tmp_path / "arquivo"
+    inexistente.write_text("x")                  # makedirs falha: o caminho é um arquivo
+    monkeypatch.delenv("MAPEADOR_BANCO")
+    monkeypatch.setenv("MAPEADOR_DADOS", str(inexistente / "dados"))
+    monkeypatch.setenv("MAPEADOR_LOGS", str(inexistente / "logs"))
+    for perfil in ("admin", "consulta"):
+        at = _app(perfil).run(timeout=30)
+        assert not at.exception
+        assert at.error
+
+
+def test_edicao_com_erro_do_banco_avisa_sem_gravar_e_solta_a_trava(monkeypatch, tmp_path):
+    def falha(*a, **k):
+        raise sqlite3.OperationalError("database is locked")
+    monkeypatch.setattr(edicao, "editar_registro", falha)
+    at = _abre_o_detalhe_do_regime("admin")
+    _linha_0(at)
+    at.button(key="editar-registro").click().run(timeout=30)
+    at.text_input(key=f"{PREFIXO}|VIGÊNCIA DO RE").input("12 meses")
+    _linha_0(at)
+    at.button(key=f"{PREFIXO}|enviar").click().run(timeout=30)
+    assert not at.exception
+    assert any("Não foi possível gravar no banco" in e.value and "database is locked" in e.value
+               for e in at.error)
+    assert _regimes_no_banco()[0]['VIGÊNCIA DO RE'] != '12 meses'
+    assert trava.situacao(str(tmp_path)) is None
+
+
+def test_aplicar_cnae_com_erro_do_banco_avisa_sem_gravar(monkeypatch, tmp_path):
+    def falha(*a, **k):
+        raise sqlite3.OperationalError("database is locked")
+    _guarda_receita()
+    monkeypatch.setattr(edicao, "editar_registro", falha)
+    at = _abre_o_detalhe_do_regime("admin")
+    _linha_0(at)
+    at.button(key="aplicar-cnae").click().run(timeout=30)
+    assert not at.exception
+    assert any("Não foi possível gravar no banco" in t.value for t in at.toast)
+    assert _regimes_no_banco()[0]['CNAE REQUERENTE'] != '6422-1/00'
+    assert trava.situacao(str(tmp_path)) is None
+
+
+def test_consultar_cnpj_com_erro_do_banco_avisa(monkeypatch, tmp_path):
+    def falha(*a, **k):
+        raise PermissionError("acesso negado")
+    _com_rede(monkeypatch)
+    monkeypatch.setattr("core.cnpj.atualizar", falha)
+    at = _abre_o_detalhe_do_regime("admin")
+    _linha_0(at)
+    at.button(key="consultar-cnpj").click().run(timeout=30)
+    assert not at.exception
+    assert any("Não foi possível gravar no banco" in t.value for t in at.toast)
+    assert trava.situacao(str(tmp_path)) is None
