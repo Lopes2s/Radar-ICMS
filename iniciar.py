@@ -171,9 +171,7 @@ def main():
     # Antes do primeiro print ("Endereço: ...", com "ç"): mesma correção de
     # processar.py. Sem isto, "python iniciar.py" direto do terminal — uso
     # documentado no README — quebra num console/pipe sem suporte a UTF-8,
-    # mesmo tendo aberto a interface com sucesso. Mapeador.bat já mitiga
-    # isto por outro caminho (chcp 65001 + PYTHONIOENCODING=utf-8), mas
-    # quem chama iniciar.py direto não passa por ele.
+    # mesmo tendo aberto a interface com sucesso.
     tolera_encoding_do_console()
     os.chdir(_RAIZ)        # .streamlit/config.toml e secrets.toml são lidos daqui
 

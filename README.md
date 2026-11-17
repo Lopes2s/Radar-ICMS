@@ -35,17 +35,15 @@ Versão atual: **0.10.1** (histórico em [`CHANGELOG.md`](CHANGELOG.md)).
   busca atual) — exportação opcional, o produto é o banco.
 
 ## 2. Início rápido
-Requer **Python 3.10+** e Windows para o atalho `.bat`.
+**Equipe (uso normal):** clique duas vezes em **`Radar ICMS.vbs`**, na pasta de rede
+(ver [Distribuição](#10-distribuição)). Na primeira abertura o programa é copiado para o
+computador; depois abre em segundos, sem janela de console. O perfil **Administrador**
+usa a senha fixa descrita em [Perfis e senha](#perfis-e-senha-do-administrador).
 
-1. Clique duas vezes em **`Mapeador.bat`**. Na primeira execução ele cria um
-   ambiente isolado (`.venv`, precisa de internet nessa vez), instala as
-   dependências que faltarem e abre a interface no navegador.
-2. A janela preta que aparece é o servidor: mantenha-a aberta enquanto usar a
-   ferramenta e feche-a para encerrar.
-3. Para o perfil **Administrador** (importar PDFs), crie a senha — ver
-   [Perfis e senha](#perfis-e-senha-do-administrador).
+**Desenvolvimento:** requer **Python 3.10+**. Instale as dependências e rode
+`python iniciar.py` (abre o navegador; a janela do terminal é o servidor).
 
-Pelo terminal, o equivalente é `python iniciar.py`. O servidor escuta apenas em
+O servidor escuta apenas em
 `127.0.0.1` (a ferramenta não fica exposta na rede do escritório), a telemetria
 do Streamlit fica desligada e, se a porta 8501 estiver ocupada, a próxima livre
 é usada.
@@ -273,7 +271,6 @@ o mesmo caminho — `Execucao` → `pipeline` → `armazenamento`.
 | `app.py` | interface Streamlit |
 | `processar.py` | linha de comando |
 | `iniciar.py` | abre a interface preparando o ambiente antes |
-| `Mapeador.bat` | atalho de duplo clique para `iniciar.py` |
 | `scripts/Radar ICMS.vbs` | atalho de rede, sem janela de console |
 | `scripts/montar_rede.ps1` | monta e atualiza a pasta de rede (Python portátil + dependências) |
 | `interface/design.py` | Design System Martinelli: tokens claro/escuro, CSS dos componentes e blocos de HTML (marca, cabeçalho, estado vazio) |
@@ -370,12 +367,11 @@ navegador desligam o servidor local. Um segundo clique no atalho reabre o que j�
 Entrega só os arquivos versionados, sem a pasta `.git` nem caches:
 
 ```bash
-git archive --format=zip -o mapeador_pr.zip HEAD
+git archive --format=zip -o radar_icms.zip HEAD
 ```
 
-Na máquina de destino, `Mapeador.bat` cria o `.venv` na primeira execução (precisa
-de internet nessa vez). O `mapeamento.db` precisa ser copiado à parte (não é versionado).
-A senha do Administrador já vem no programa.
+Na máquina de destino, instale o Python 3.10+ e as dependências (`pip install -r requirements.txt`)
+e rode `python iniciar.py`. O `mapeamento.db` precisa ser copiado à parte (não é versionado).
 
 ## 11. Limitações conhecidas
 - Os padrões de vigência dos regimes cobrem os casos vistos; podem existir
