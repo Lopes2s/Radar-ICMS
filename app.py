@@ -144,6 +144,8 @@ def _fecha_selecao_da_tabela():
     é só-leitura, não dá para mudar em lugar (ver DataframeSelectionState)."""
     st.session_state["tabela-resultados"] = {"selection": {"rows": []}}
     st.session_state.pop("editando", None)
+    st.session_state.pop("excluindo", None)
+    st.session_state.pop("erro_exclusao", None)
 
 
 # Os campos numerados de regime (ABRANGÊNCIA, BENEFÍCIOS/PROCEDIMENTOS,
@@ -198,6 +200,43 @@ def _comecar_edicao(prefixo: str):
 def _cancelar_edicao():
     st.session_state.pop("editando", None)
     st.session_state.pop("erro_edicao", None)
+
+
+def _pedir_exclusao(prefixo: str):
+    st.session_state["excluindo"] = prefixo
+    st.session_state.pop("erro_exclusao", None)
+
+
+def _cancelar_exclusao():
+    st.session_state.pop("excluindo", None)
+    st.session_state.pop("erro_exclusao", None)
+
+
+def _excluir_ato(tipo: str, registro: dict):
+    """on_click da confirmação do detalhe: exclui o ato (só administrador), com a trava e
+    um backup ANTES de apagar. Em erro (outra pessoa gravando, pasta de rede fora do ar)
+    a confirmação continua aberta com a mensagem; com sucesso o detalhe fecha."""
+    acesso.exige_admin(st.session_state.get("perfil"))
+    chave_atual = {c: registro[c] for c in edicao.TIPOS[tipo][2]}
+    pasta = _pasta_do_banco()
+    try:
+        with _escrevendo():
+            backup.fazer_backup(armazenamento.caminho_do_banco(_CAMINHO_BANCO),
+                                os.path.join(pasta, "backups"))
+            with armazenamento.sessao(_CAMINHO_BANCO) as conn:
+                edicao.excluir_registro(conn, tipo, chave_atual)
+    except edicao.RegistroInexistente:
+        st.session_state["aviso"] = "Este ato já não existe (talvez outra pessoa o tenha excluído)."
+        _fecha_selecao_da_tabela()
+        return
+    except trava.ImportacaoEmAndamento as erro:
+        st.session_state["erro_exclusao"] = str(erro)
+        return
+    except (OSError, sqlite3.Error) as erro:
+        st.session_state["erro_exclusao"] = f"Não foi possível excluir ({erro}). Confira a pasta de rede e tente de novo."
+        return
+    st.session_state["aviso"] = f"Ato excluído: {edicao.rotulo_do_ato(tipo, chave_atual)}."
+    _fecha_selecao_da_tabela()
 
 
 def _avisar(r: dict, o_que: str):
@@ -334,6 +373,19 @@ def _mostra_detalhe(tipo: str, registro: dict, colunas: list, historico=(),
                   icon=":material/close:", on_click=_cancelar_edicao)
         return
 
+    if pode_editar and st.session_state.get("excluindo") == prefixo:
+        st.warning("Excluir este ato? Ele sai do banco, com o histórico de alterações dele. "
+                   "É feito um backup antes. Esta ação não pode ser desfeita pela ferramenta.")
+        erro = st.session_state.pop("erro_exclusao", None)
+        if erro:
+            st.error(erro)
+        with st.container(horizontal=True):
+            st.button("Confirmar exclusão", key="confirmar-exclusao", type="primary",
+                      icon=":material/delete:", on_click=_excluir_ato, args=(tipo, registro))
+            st.button("Cancelar", key="cancelar-exclusao", type="tertiary",
+                      icon=":material/close:", on_click=_cancelar_exclusao)
+        return
+
     if ajustes:
         st.caption("Ajustado manualmente: " + ", ".join(ajustes))
     for campo in colunas:
@@ -351,8 +403,11 @@ def _mostra_detalhe(tipo: str, registro: dict, colunas: list, historico=(),
     if tipo == "regime":
         _bloco_receita(registro, receita, pode_editar)
     if pode_editar:
-        st.button("Editar", key="editar-registro", icon=":material/edit:",
-                  on_click=_comecar_edicao, args=(prefixo,))
+        with st.container(horizontal=True):
+            st.button("Editar", key="editar-registro", icon=":material/edit:",
+                      on_click=_comecar_edicao, args=(prefixo,))
+            st.button("Excluir", key="excluir-registro", icon=":material/delete:",
+                      on_click=_pedir_exclusao, args=(prefixo,))
     if historico:
         with st.expander(f"Histórico de alterações ({len(historico)})"):
             for h in historico:

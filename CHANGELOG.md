@@ -1,5 +1,8 @@
 # Histórico de versões
 
+## 0.10.2
+- **Excluir ato**: o detalhe de regimes e consultas ganhou o botão **Excluir**, ao lado de **Editar** (só Administrador). Pede confirmação, faz **backup** antes e usa a trava de gravação; apaga o ato, o histórico e os ajustes dele (os dados da Receita por CNPJ ficam). Reimportar o PDF recria o ato.
+
 ## 0.10.1
 - **Cópia local automática**: rodar o Python pela pasta de rede levava minutos para abrir. Agora `montar_rede.ps1` monta o programa numa pasta local, empacota num `.zip` versionado (`programa\`) e o `Radar ICMS.vbs` copia/atualiza o programa em `%LOCALAPPDATA%\RadarICMS` na primeira abertura e a cada versão nova. Só o banco, a trava e os backups continuam na rede.
 - `montar_rede.ps1` não recusa mais atualizar com a ferramenta em uso (`-Forcar` removido) e pode rodar a qualquer hora.

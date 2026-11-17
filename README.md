@@ -4,7 +4,7 @@ Ferramenta local que lê PDFs da SEFA-PR (consultas tributárias) e do Diário
 Oficial (regimes especiais), extrai os campos objetivos, mapeia tudo num banco
 SQLite e permite consultar o que foi mapeado por uma interface web (Streamlit).
 
-Versão atual: **0.10.1** (histórico em [`CHANGELOG.md`](CHANGELOG.md)).
+Versão atual: **0.10.2** (histórico em [`CHANGELOG.md`](CHANGELOG.md)).
 
 ## Sumário
 1. [O que a ferramenta faz](#1-o-que-a-ferramenta-faz)

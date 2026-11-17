@@ -362,3 +362,63 @@ def test_analise_ainda_deixa_corrigir_a_chave_e_campos_de_ato_ainda_nao_gravado(
     r = edicao.ajustar_no_lote(lote2, 'regime', _chave_regime(gravado),
                                {'EMENTA': 'x'}, conn=conn)
     assert r['alterados'] == ['EMENTA']
+
+
+# --- excluir_registro -------------------------------------------------------
+def test_excluir_regime_apaga_o_ato_o_historico_e_os_ajustes(tmp_path):
+    conn = _conn(tmp_path)
+    armazenamento.salvar_regimes(conn, [_regime(), _regime(**{'Nº DO REGIME ESPECIAL': '2/2026'})])
+    edicao.editar_registro(conn, 'regime', _chave_regime(), {'VIGÊNCIA DO RE': '12 meses'})
+    assert armazenamento.historico_de(conn, 'regimes', _chave_regime())
+    assert armazenamento.ajustes_de(conn, 'regimes', CHAVE_R, [_regime()[c] for c in CHAVE_R])
+
+    r = edicao.excluir_registro(conn, 'regime', _chave_regime())
+
+    assert r['excluido']['Nº DO REGIME ESPECIAL'] == '9.053/2026'
+    restantes = armazenamento.buscar_regimes(conn)
+    assert [x['Nº DO REGIME ESPECIAL'] for x in restantes] == ['2/2026']      # o outro fica
+    assert armazenamento.historico_de(conn, 'regimes', _chave_regime()) == []
+    assert armazenamento.ajustes_de(conn, 'regimes', CHAVE_R, [_regime()[c] for c in CHAVE_R]) == []
+
+
+def test_excluir_consulta(tmp_path):
+    conn = _conn(tmp_path)
+    c = _consulta()
+    armazenamento.salvar_consultas(conn, [c, _consulta(**{'Nº da Consulta': '002'})])
+    edicao.excluir_registro(conn, 'consulta', {k: c[k] for k in CHAVE_C})
+    assert [x['Nº da Consulta'] for x in armazenamento.buscar_consultas(conn)] == ['002']
+
+
+def test_excluir_ato_inexistente_levanta_e_nao_mexe_em_nada(tmp_path):
+    conn = _conn(tmp_path)
+    armazenamento.salvar_regimes(conn, [_regime()])
+    with pytest.raises(edicao.RegistroInexistente):
+        edicao.excluir_registro(conn, 'regime', _chave_regime(_regime(**{'Nº DO REGIME ESPECIAL': '7/2026'})))
+    assert len(armazenamento.buscar_regimes(conn)) == 1
+
+
+def test_excluir_nao_mexe_nos_dados_da_receita_nem_em_atos_de_outra_tabela(tmp_path):
+    conn = _conn(tmp_path)
+    armazenamento.salvar_regimes(conn, [_regime()])
+    armazenamento.salvar_consultas(conn, [_consulta()])
+    armazenamento.salvar_cnpj_receita(conn, {
+        'cnpj': '11222333000181', 'razao_social': 'Alfa', 'cnae_codigo': '1234567',
+        'cnae_descricao': 'x', 'situacao': 'ATIVA'})
+    edicao.excluir_registro(conn, 'regime', _chave_regime())
+    assert armazenamento.cnpj_receita_de(conn, '11222333000181') is not None
+    assert len(armazenamento.buscar_consultas(conn)) == 1
+
+
+def test_excluir_ato_de_chave_corrigida_apaga_os_apelidos_e_o_pdf_original_recria(tmp_path):
+    conn = _conn(tmp_path)
+    original = _regime()
+    armazenamento.salvar_regimes(conn, [original])
+    edicao.editar_registro(conn, 'regime', _chave_regime(),
+                           {'CNPJ REQUERENTE': '99.999.999/0001-99'})       # chave corrigida
+    corrigida = _regime(**{'CNPJ REQUERENTE': '99.999.999/0001-99'})
+    edicao.excluir_registro(conn, 'regime', _chave_regime(corrigida))
+    assert armazenamento.buscar_regimes(conn) == []
+    assert conn.execute('SELECT COUNT(*) FROM chaves_substituidas').fetchone()[0] == 0
+    # reimportar o PDF original: o ato volta com a chave original
+    armazenamento.salvar_regimes(conn, [original])
+    assert [x['CNPJ REQUERENTE'] for x in armazenamento.buscar_regimes(conn)] == ['11.222.333/0001-81']

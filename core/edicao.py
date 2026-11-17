@@ -104,6 +104,35 @@ def editar_registro(conn, tipo: str, chave_atual: dict, novos: dict) -> dict:
     return {'alterados': alterados, 'chave_trocada': trocada}
 
 
+def excluir_registro(conn, tipo: str, chave_atual: dict) -> dict:
+    """Exclui um ato JÁ GRAVADO, com o histórico, os ajustes manuais e os apelidos de
+    chave dele. Os dados da Receita por CNPJ ficam (servem a outros regimes). Reimportar
+    o PDF recria o ato. Tudo ou nada. Devolve {'excluido': {chave}}.
+    Levanta RegistroInexistente se o ato não existe (por exemplo, já foi excluído)."""
+    tabela, _colunas, chave = _tipo(tipo)
+    atual = armazenamento.buscar_detalhe(conn, tabela, chave, chave_atual)
+    if atual is None:
+        raise RegistroInexistente(f"Não há ato com a chave {chave_atual!r}.")
+    valores = tuple(_texto(atual[c]) for c in chave)
+    json_chave = armazenamento._chave_json(chave, valores)
+    try:
+        onde = ' AND '.join(f'"{c}" = ?' for c in chave)
+        conn.execute(f'DELETE FROM {tabela} WHERE {onde}', list(valores))
+        conn.execute('DELETE FROM historico WHERE tabela = ? AND chave = ?',
+                     (tabela, json_chave))
+        armazenamento.limpar_ajustes(conn, tabela, chave, valores)
+        # apelidos que apontavam para este ato (e o dele próprio): senão o PDF original
+        # reimportado cairia numa chave que já não existe, em vez de recriar o ato
+        conn.execute('DELETE FROM chaves_substituidas WHERE tabela = ? '
+                     'AND (chave_nova = ? OR chave_antiga = ?)',
+                     (tabela, json_chave, json_chave))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return {'excluido': dict(zip(chave, valores))}
+
+
 def rotulo_do_ato(tipo: str, chave_dict: dict) -> str:
     """'Consulta 001/2026' ou 'RE 9.053/2026' (mesmos rótulos do diagnóstico)."""
     if tipo == 'consulta':

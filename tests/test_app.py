@@ -1197,3 +1197,94 @@ def test_consultar_cnpj_com_erro_do_banco_avisa(monkeypatch, tmp_path):
     assert not at.exception
     assert any("Não foi possível gravar no banco" in t.value for t in at.toast)
     assert trava.situacao(str(tmp_path)) is None
+
+
+# --- excluir ato ------------------------------------------------------------
+def test_perfil_consulta_nao_ve_o_botao_excluir():
+    at = _abre_o_detalhe_do_regime("consulta")
+    assert "excluir-registro" not in {b.key for b in at.button}
+
+
+def test_admin_ve_excluir_ao_lado_de_editar_e_pede_confirmacao_sem_apagar():
+    at = _abre_o_detalhe_do_regime("admin")
+    chaves = {b.key for b in at.button}
+    assert {"editar-registro", "excluir-registro"} <= chaves
+    _linha_0(at)
+    at.button(key="excluir-registro").click().run(timeout=30)
+    assert not at.exception
+    assert any("Excluir este ato?" in w.value for w in at.warning)
+    assert {"confirmar-exclusao", "cancelar-exclusao"} <= {b.key for b in at.button}
+    assert len(_regimes_no_banco()) == 1                       # nada foi apagado ainda
+
+
+def test_confirmar_exclui_o_regime_faz_backup_e_solta_a_trava(tmp_path):
+    at = _abre_o_detalhe_do_regime("admin")
+    _linha_0(at)
+    at.button(key="excluir-registro").click().run(timeout=30)
+    _linha_0(at)
+    at.button(key="confirmar-exclusao").click().run(timeout=30)
+    assert not at.exception
+    assert _regimes_no_banco() == []
+    assert any("Ato excluído: RE 9.053/2026" in t.value for t in at.toast)
+    assert "excluindo" not in at.session_state.filtered_state
+    assert len(list((tmp_path / "backups").glob("*.db"))) == 1          # backup ANTES de apagar
+    assert trava.situacao(str(tmp_path)) is None
+
+
+def test_cancelar_a_exclusao_volta_ao_detalhe_sem_apagar():
+    at = _abre_o_detalhe_do_regime("admin")
+    _linha_0(at)
+    at.button(key="excluir-registro").click().run(timeout=30)
+    _linha_0(at)
+    at.button(key="cancelar-exclusao").click().run(timeout=30)
+    assert not at.exception
+    assert "excluir-registro" in {b.key for b in at.button}
+    assert len(_regimes_no_banco()) == 1
+
+
+def test_exclusao_espera_a_trava_e_avisa_quem_grava(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAPEADOR_ESPERA_TRAVA_S", "0")
+    at = _abre_o_detalhe_do_regime("admin")
+    trava.adquirir(str(tmp_path), "maria", "PC-02")
+    _linha_0(at)
+    at.button(key="excluir-registro").click().run(timeout=30)
+    _linha_0(at)
+    at.button(key="confirmar-exclusao").click().run(timeout=30)
+    assert not at.exception
+    assert len(_regimes_no_banco()) == 1                       # nada foi apagado
+    assert any("maria (PC-02) está gravando" in e.value for e in at.error)
+    assert "confirmar-exclusao" in {b.key for b in at.button}  # a confirmação continua aberta
+
+
+def test_excluir_ato_que_outra_pessoa_ja_excluiu_avisa_e_fecha():
+    at = _abre_o_detalhe_do_regime("admin")
+    _linha_0(at)
+    at.button(key="excluir-registro").click().run(timeout=30)
+    conn = _banco_do_teste()                                   # outra pessoa exclui antes
+    conn.execute("DELETE FROM regimes")
+    conn.commit()
+    conn.close()
+    _linha_0(at)
+    at.button(key="confirmar-exclusao").click().run(timeout=30)
+    assert not at.exception
+    assert any("já não existe" in t.value for t in at.toast)
+
+
+def test_admin_exclui_uma_consulta_pelo_detalhe():
+    _semeia(consultas=[{
+        'Ano': '2026', 'Nº da Consulta': '001', 'Data da Publicação': '2026-01-19',
+        'Protocolo': '', 'Súmula': 'ICMS.', 'Problema da Consulta': '',
+        'CNAE Detectado': '', 'Resposta': 'resposta'}])
+    at = _app("admin").run(timeout=30)
+    at.tabs[1].selectbox[0].set_value("consulta").run(timeout=30)
+    _linha_0(at)
+    at.run(timeout=30)
+    _linha_0(at)
+    at.button(key="excluir-registro").click().run(timeout=30)
+    _linha_0(at)
+    at.button(key="confirmar-exclusao").click().run(timeout=30)
+    assert not at.exception
+    assert any("Ato excluído: Consulta 001/2026" in t.value for t in at.toast)
+    conn = _banco_do_teste()
+    assert armazenamento.buscar_consultas(conn) == []
+    conn.close()
